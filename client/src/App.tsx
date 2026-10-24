@@ -2,33 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type ApiResponse } from "./api";
 import { DeciderSection, HigherSelfView } from "./HigherSelfView";
-import pushUpImage from "./assets/push-up.jpg";
-import chairDipImage from "./assets/chair-dip.jpg";
-import pikePushUpImage from "./assets/pike-push-up.jpg";
-import squatImage from "./assets/bodyweight-squat.jpg";
-import reverseLungeImage from "./assets/reverse-lunge.jpg";
-import gluteBridgeImage from "./assets/glute-bridge.jpg";
-import plankImage from "./assets/plank.png";
-import birdDogImage from "./assets/bird-dog.jpg";
-import bulgarianSplitSquatImage from "./assets/bulgarian-split-squat.jpg";
-import deadHangImage from "./assets/dead-hang.jpg";
-import scapPullImage from "./assets/scap-pull.jpg";
-import chinUpImage from "./assets/chin-up.jpg";
-import assistedChinUpImage from "./assets/assisted-chin-up.jpg";
-import floorPressImage from "./assets/dumbbell-floor-press.jpg";
-import singleLegRdlImage from "./assets/single-leg-rdl.jpg";
-import lateralRaiseImage from "./assets/dumbbell-lateral-raise.jpg";
-import deadBugImage from "./assets/dead-bug.jpg";
-import hangingKneeRaiseImage from "./assets/hanging-knee-raise.png";
-import gobletSquatImage from "./assets/goblet-squat.jpg";
-import overheadPressImage from "./assets/dumbbell-overhead-press.webp";
-import oneArmRowImage from "./assets/one-arm-row.jpg";
-import hipThrustImage from "./assets/dumbbell-hip-thrust.jpg";
-import tricepsExtensionImage from "./assets/overhead-triceps-extension.jpg";
-import dumbbellCurlImage from "./assets/dumbbell-curl.jpg";
-import calfRaiseImage from "./assets/single-leg-calf-raise.jpg";
-import inclinePushUpImage from "./assets/incline-push-up.jpg";
-import declinePushUpImage from "./assets/decline-push-up.jpg";
+import { AppNavigation } from "./components/AppNavigation";
+import { TodayOverview } from "./components/TodayOverview";
 
 type AppState = ApiResponse<typeof api, "getAppState">;
 type FocusState = ApiResponse<typeof api, "getFocusState">;
@@ -37,7 +12,7 @@ type Exercise = AppState["program"]["session_a"][number];
 type DraftSet = { weight: string; reps: string; rpe: string; completed: boolean; missed: boolean };
 type DraftExercise = { name: string; pain: boolean; sets: DraftSet[] };
 type StoredSessionDraft = { requestId: string; sessionType: SessionType; exercises: DraftExercise[] };
-type Tab = "focus" | "train" | "history" | "trends" | "higher";
+export type Tab = "focus" | "train" | "history" | "trends" | "higher";
 type RitualKey = "sunlight" | "meditation" | "visualization" | "chewingGum" | "oneFootStand";
 
 const ritualMeta: Array<{ key: RitualKey; title: string; detail: string }> = [
@@ -47,43 +22,6 @@ const ritualMeta: Array<{ key: RitualKey; title: string; detail: string }> = [
   { key: "chewingGum", title: "Chewing gum", detail: "Morning routine · chew gum after you get up" },
   { key: "oneFootStand", title: "Stand on one foot", detail: "Balance · 30s per side · near a wall for support" },
 ];
-
-const exerciseImages: Partial<Record<string, { src: string; alt: string; source: string }>> = {
-  "Push-Up": { src: pushUpImage, alt: "Athlete demonstrating a push-up with a straight body line", source: "https://solnutrition.com/blogs/gut-health-metabolism/skinny-me-full-body-beginner-workout" },
-  "Chair Dip": { src: chairDipImage, alt: "Athlete demonstrating a chair dip", source: "https://www.fitnessai.co/exercise/chair-dip" },
-  "Pike Push-Up": { src: pikePushUpImage, alt: "Athlete demonstrating the pike push-up position", source: "https://boxlifemagazine.com/pike-push-up-progression/" },
-  "Bodyweight Squat": { src: squatImage, alt: "Athlete demonstrating a bodyweight squat", source: "https://www.endomondo.com/exercise/bodyweight-squat" },
-  "Reverse Lunge": { src: reverseLungeImage, alt: "Athlete demonstrating a reverse lunge", source: "https://www.hevyapp.com/exercises/reverse-lunge/" },
-  "Glute Bridge": { src: gluteBridgeImage, alt: "Athlete demonstrating a glute bridge", source: "https://bootylabinc.com/glute-bridge/" },
-  "Plank": { src: plankImage, alt: "Athlete demonstrating a forearm plank", source: "https://www.hingehealth.com/resources/articles/plank/" },
-  "Bird Dog": { src: birdDogImage, alt: "Athlete demonstrating the bird dog exercise", source: "https://www.tomsguide.com/how-to/bird-dog-exercise-what-is-it-and-how-does-it-help-build-core-strength" },
-  "Rear-Foot-Elevated Split Squat": { src: bulgarianSplitSquatImage, alt: "Athlete demonstrating a rear-foot-elevated split squat holding dumbbells, start and lowered positions", source: "https://www.angrylionfitness.com/the-10-best-quadricep-exercises/" },
-  "Bulgarian Split Squat": { src: bulgarianSplitSquatImage, alt: "Athlete demonstrating a Bulgarian split squat holding dumbbells, start and lowered positions", source: "https://www.angrylionfitness.com/the-10-best-quadricep-exercises/" },
-  "Dead Hang": { src: deadHangImage, alt: "Athlete performing a dead hang from a pull-up bar with straight arms", source: "https://www.tomecontroldesusalud.com/2024-04-05-l-dead-hang/" },
-  "Scap Pull": { src: scapPullImage, alt: "Anatomical illustration of a scapular pull-up on a bar, showing the shoulder blades pulling down", source: "https://www.inspireusafoundation.org/scapular-pull-ups/" },
-  "Chin-Up": { src: chinUpImage, alt: "Athlete performing a chin-up with an underhand grip", source: "https://viral-chatter.com/80-of-adults-will-face-back-pain-try-these-18-workouts-for-a-stronger-healthier-back/" },
-  "Chin-Up Negatives": { src: chinUpImage, alt: "Athlete at the top of a chin-up with an underhand grip, the start of the slow lowering phase", source: "https://viral-chatter.com/80-of-adults-will-face-back-pain-try-these-18-workouts-for-a-stronger-healthier-back/" },
-  "Assisted Chin-Up": { src: assistedChinUpImage, alt: "Athlete performing a foot-assisted pull-up on a low bar, feet on the ground providing leg help", source: "http://dieringe.com/exercises/assisted-pull-ups" },
-  "Dumbbell Floor Press": { src: floorPressImage, alt: "Athlete demonstrating a dumbbell floor press lying on the floor, press and lowered positions", source: "https://www.mensfitness.com/training/the-best-chest-workouts-for-men-20150514" },
-  "DB Floor Press": { src: floorPressImage, alt: "Athlete demonstrating a dumbbell floor press lying on the floor, press and lowered positions", source: "https://www.mensfitness.com/training/the-best-chest-workouts-for-men-20150514" },
-  "Single-Leg Romanian Deadlift": { src: singleLegRdlImage, alt: "Athlete demonstrating a single-leg Romanian deadlift with dumbbells, standing and hinged positions", source: "https://www.pinterest.fr/mikeudem/" },
-  "Dumbbell Lateral Raise": { src: lateralRaiseImage, alt: "Illustration of a dumbbell lateral raise, arms at the sides and raised to shoulder height", source: "https://kinxlearning.com/pages/lateral-dumbbell-arm-raise" },
-  "DB Lateral Raise": { src: lateralRaiseImage, alt: "Illustration of a dumbbell lateral raise, arms at the sides and raised to shoulder height", source: "https://kinxlearning.com/pages/lateral-dumbbell-arm-raise" },
-  "Dead Bug": { src: deadBugImage, alt: "Athlete demonstrating the dead bug exercise on a mat, opposite arm and leg extended", source: "https://www.decathloncoach.com/fr/home/coaching/sport-program/a8364aaee015b6c230d2" },
-  "Hanging Knee Raise": { src: hangingKneeRaiseImage, alt: "Athlete performing a hanging knee raise from a pull-up bar with knees tucked up", source: "https://hortonbarbell.com/hanging-knee-raise/" },
-  "Goblet Squat": { src: gobletSquatImage, alt: "Athlete demonstrating a goblet squat holding a dumbbell at the chest at full depth", source: "https://stage.eatthis.com/best-exercises-over-60/" },
-  "Dumbbell Overhead Press": { src: overheadPressImage, alt: "Athlete demonstrating a dumbbell overhead press, dumbbells at shoulder height and pressed overhead", source: "https://traineatrepeat.com/exercises/dumbbell-overhead-press" },
-  "Standing DB Overhead Press": { src: overheadPressImage, alt: "Athlete demonstrating a standing dumbbell overhead press", source: "https://traineatrepeat.com/exercises/dumbbell-overhead-press" },
-  "One-Arm Dumbbell Row": { src: oneArmRowImage, alt: "Illustration of a one-arm dumbbell row with the other arm braced for support", source: "https://workoutguru.fit/exercises/dumbbell-one-arm-row-rack-support-video-exercise-guide-tips-123612/" },
-  "Single-Arm DB Row": { src: oneArmRowImage, alt: "Illustration of a single-arm dumbbell row with the other arm braced for support", source: "https://workoutguru.fit/exercises/dumbbell-one-arm-row-rack-support-video-exercise-guide-tips-123612/" },
-  "Dumbbell Hip Thrust": { src: hipThrustImage, alt: "Athlete demonstrating a dumbbell hip thrust with upper back on a bench and a dumbbell on the hips", source: "https://gymingdaily.com/18-resistance-training-exercises-for-full-body-tone/" },
-  "Overhead Triceps Extension": { src: tricepsExtensionImage, alt: "Illustration of a seated overhead dumbbell triceps extension", source: "https://workoutguru.fit/exercises/dumbbell-seated-single-arm-overhead-triceps-extension-left-video-exercise-guide-tips-615912/" },
-  "Overhead DB Triceps Extension": { src: tricepsExtensionImage, alt: "Illustration of a seated overhead dumbbell triceps extension", source: "https://workoutguru.fit/exercises/dumbbell-seated-single-arm-overhead-triceps-extension-left-video-exercise-guide-tips-615912/" },
-  "Dumbbell Curl": { src: dumbbellCurlImage, alt: "Illustration of a standing dumbbell curl with the biceps highlighted", source: "https://strengthlevel.com/exercises/dumbbell-curl" },
-  "Single-Leg Calf Raise": { src: calfRaiseImage, alt: "Illustration of a single-leg calf raise on a step with wall support, calf highlighted", source: "https://workoutguru.fit/exercises/single-leg-calf-raise-off-step-video-exercise-guide-tips-505212/" },
-  "Push-Up (Hands Elevated)": { src: inclinePushUpImage, alt: "Athlete demonstrating an incline push-up with hands elevated on a raised surface", source: "https://fitnessvolt.com/category/training/body-mechanics/page/5/" },
-  "Push-Up (Feet Elevated)": { src: declinePushUpImage, alt: "Illustration of a decline push-up with feet elevated on a bench", source: "https://www.sfd.pl/post-p4117425.html" },
-};
 
 function localDateKey(): string {
   const now = new Date();
@@ -607,28 +545,29 @@ function FocusView({ state, dateKey }: { state: AppState; dateKey: string }) {
 
   return <main className="page focus-page">
     <section className="focus-masthead">
-      <div><p className="eyebrow">TODAY · MOVE THE NEEDLE</p><h1>{focus?.plan.frogCompleted ? "Done, not busy." : "Do the hard thing first."}</h1></div>
+      <div><p className="eyebrow">YOUR DAY, WITH INTENTION</p><h1>{focus?.plan.frogCompleted ? "A little progress. A big difference." : "Make room for what matters."}</h1><p className="page-subtitle">One meaningful priority. A little movement. Time for yourself.</p></div>
       <div className="needle-stat"><b>{focus?.todayNeedleMinutes ?? 0}</b><span>needle min</span></div>
     </section>
 
-    <QuickCapture state={state} focus={focus} dateKey={dateKey} onCheckin={jumpToCheckin} />
+    <TodayOverview minutes={focus?.todayNeedleMinutes ?? 0} ritualsDone={ritualMeta.filter((ritual) => state.rituals.today[ritual.key]).length} ritualsTotal={ritualMeta.length} energy={state.wellness.today?.energy ?? null} />
 
-    <WakeTracker focus={focus} dateKey={dateKey} />
+    <div className="focus-main-column">
+    {focusQuery.isError && <p className="inline-error" role="alert">Your focus plan couldn’t load. <button onClick={() => focusQuery.refetch()}>Try again</button></p>}
 
-    {!state.wellness.today && <aside className="proactive-check" aria-label="Proactive check-in"><div><strong>Don’t run today on yesterday’s data.</strong><span>Thirty seconds: sleep, energy, stress, soreness.</span></div><button onClick={jumpToCheckin}>Check in now</button></aside>}
-    {recoveryPrompt && <aside className="proactive-check recovery" aria-label="Recovery check-in"><div><strong>Recovery is the constraint today.</strong><span>{recoveryPrompt}</span></div><button onClick={jumpToCheckin}>Review</button></aside>}
+    {!state.wellness.today && <aside className="proactive-check" aria-label="Proactive check-in"><div><strong>How are you arriving today?</strong><span>Thirty seconds: sleep, energy, stress, soreness.</span></div><button onClick={jumpToCheckin}>Check in now</button></aside>}
+    {recoveryPrompt && <aside className="proactive-check recovery" aria-label="Recovery check-in"><div><strong>A gentler pace might help today.</strong><span>{recoveryPrompt}</span></div><button onClick={jumpToCheckin}>Review</button></aside>}
     {middayTripwire && focus && <div className="tripwire" role="status"><div><strong>Midday check: “{focus.plan.frog}” hasn’t started.</strong><span>{focus.parkingLot.length > 0 ? `${focus.parkingLot.length} side task${focus.parkingLot.length === 1 ? "" : "s"} already parked (${focus.parkingLot.slice(0, 2).map((item) => item.text).join(", ")}${focus.parkingLot.length > 2 ? "…" : ""}) and the frog still hasn’t moved. Start it before another side task wins.` : "The frog you locked this morning is still untouched. Start it before another side task wins."}</span></div><button onClick={() => startFrog.mutate()} disabled={startFrog.isPending} aria-label={`Start ${focus.plan.frog}`}>Start now</button></div>}
 
     <section className={`frog-card ${focus?.plan.frogCompleted ? "complete" : ""}`} aria-labelledby="frog-heading">
-      <div className="frog-label"><span>01</span><div><p className="eyebrow">THE FROG · NO SIDE TASKS FIRST</p><h2 id="frog-heading">{editingPlan ? (focus?.plan.frog ? "Edit today’s Big 3" : "Name what you’re avoiding") : (focus?.plan.frog || "Name what you’re avoiding")}</h2></div>{!editingPlan && focus?.plan.frog && <span className="lock-chip">{focus.plan.frogCompleted ? "Done" : focus.plan.frogStartedAt ? "Started" : "Locked"}</span>}</div>
-      {focus?.plan.frogReason && !editingPlan && <p className="needle-reason">Moves the needle because: <b>{focus.plan.frogReason}</b></p>}
+      <div className="frog-label"><span>01</span><div><p className="eyebrow">TODAY’S TOP PRIORITY</p><h2 id="frog-heading">{editingPlan ? (focus?.plan.frog ? "Edit today’s Big 3" : "What matters most today?") : (focus?.plan.frog || "What matters most today?")}</h2></div>{!editingPlan && focus?.plan.frog && <span className="lock-chip">{focus.plan.frogCompleted ? "Done" : focus.plan.frogStartedAt ? "Started" : "Locked"}</span>}</div>
+      {focus?.plan.frogReason && !editingPlan && <p className="needle-reason">Why it matters: <b>{focus.plan.frogReason}</b></p>}
       {editingPlan && <div className="big-three-form">
-        <label><span>1 · The task you’re avoiding</span><input value={frog} onChange={(event) => setFrog(event.target.value)} maxLength={180} placeholder="Call the first 20 roofers" /></label>
+        <label><span>1 · Your most important task</span><input value={frog} onChange={(event) => setFrog(event.target.value)} maxLength={180} placeholder="Call the first 20 roofers" /></label>
         <label><span>Why this moves the goal</span><input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={240} placeholder="Direct path to the next client" /></label>
         <label><span>2 · Next outcome</span><input value={taskTwo} onChange={(event) => setTaskTwo(event.target.value)} maxLength={180} placeholder="One concrete outcome" /></label>
         <label><span>3 · Last outcome</span><input value={taskThree} onChange={(event) => setTaskThree(event.target.value)} maxLength={180} placeholder="One concrete outcome" /></label>
         <div className="big-three-actions">
-          <button className="save-plan" disabled={!frog.trim() || !reason.trim() || !taskTwo.trim() || !taskThree.trim() || savePlan.isPending} onClick={() => savePlan.mutate()}>{savePlan.isPending ? "Saving…" : focus?.plan.frog ? "Save Big 3" : "Lock today’s Big 3"}</button>
+          <button className="save-plan" disabled={!frog.trim() || !reason.trim() || !taskTwo.trim() || !taskThree.trim() || savePlan.isPending} onClick={() => savePlan.mutate()}>{savePlan.isPending ? "Saving…" : focus?.plan.frog ? "Save Big 3" : "Save today’s plan"}</button>
           {focus?.plan.frog && <button className="cancel-plan" onClick={cancelPlanEditor}>Cancel</button>}
         </div>
         {savePlan.isError && <p className="inline-error" role="alert">Couldn’t save yet. Your Big 3 is still here.</p>}
@@ -655,24 +594,32 @@ function FocusView({ state, dateKey }: { state: AppState; dateKey: string }) {
       {ratingOpen && <div className="rating-panel"><span>How focused were you?</span><div>{[1,2,3,4,5].map((value) => <button key={value} className={focusRating === value ? "selected" : ""} onClick={() => setFocusRating(value)} aria-label={`Focus rating ${value} out of 5`}>{value}</button>)}</div><button className="save-block" onClick={() => saveBlock.mutate()} disabled={saveBlock.isPending}>{saveBlock.isPending ? "Saving…" : "Save block"}</button></div>}
     </section>}
 
+    <QuickCapture state={state} focus={focus} dateKey={dateKey} onCheckin={jumpToCheckin} />
+
     <section className="parking-card" aria-labelledby="parking-heading">
-      <div className="section-line"><div><p className="eyebrow">DON’T DO IT. DON’T LOSE IT.</p><h2 id="parking-heading">Side-task parking lot</h2></div><span className="parking-count">{focus?.parkingLot.length ?? 0}</span></div>
+      <div className="section-line"><div><p className="eyebrow">CLEAR YOUR MIND, KEEP YOUR FOCUS</p><h2 id="parking-heading">Save for later</h2></div><span className="parking-count">{focus?.parkingLot.length ?? 0}</span></div>
       <form className="parking-entry" onSubmit={(event) => { event.preventDefault(); const text = parkingDraft.trim(); if (text) addParking.mutate(text); }}>
-        <input value={parkingDraft} onChange={(event) => setParkingDraft(event.target.value)} maxLength={180} placeholder="Park the urge here" aria-label="Side task to park" />
+        <input value={parkingDraft} onChange={(event) => setParkingDraft(event.target.value)} maxLength={180} placeholder="A thought or task for later…" aria-label="Side task to park" />
         <button disabled={!parkingDraft.trim() || addParking.isPending}>Park it</button>
       </form>
-      {focus?.parkingLot.length ? <div className="parking-list">{focus.parkingLot.map((item) => <div key={item.id}><span>{item.text}</span><button onClick={() => clearParking.mutate(item.id)} aria-label={`Clear ${item.text}`}>Clear</button></div>)}</div> : <p className="parking-empty">When a side task shows up, save it here and stay on the needle.</p>}
+      {focus?.parkingLot.length ? <div className="parking-list">{focus.parkingLot.map((item) => <div key={item.id}><span>{item.text}</span><button onClick={() => clearParking.mutate(item.id)} aria-label={`Clear ${item.text}`}>Clear</button></div>)}</div> : <p className="parking-empty">Nothing here yet. Capture distractions here and return to your priority.</p>}
     </section>
 
+    </div>
+    <aside className="focus-side-column" aria-label="Your daily balance">
+    <WellnessCheckin state={state} dateKey={dateKey} />
+    <WakeTracker focus={focus} dateKey={dateKey} />
     <section className="focus-scoreboard">
       <div><p className="eyebrow">LAST 7 DAYS</p><strong>{weekMinutes}</strong><span>needle minutes</span></div>
       <div className="week-bars" aria-label={`${weekMinutes} focus minutes over the last seven days`}>{focus?.lastSevenDays.map((day) => <span key={day.dateKey} style={{ height: `${Math.max(6, Math.min(100, day.minutes / 90 * 100))}%` }} title={`${day.dateKey}: ${day.minutes} minutes`} />)}</div>
     </section>
 
-    <WellnessCheckin state={state} dateKey={dateKey} />
-    <NightlyCheck state={state} dateKey={dateKey} />
     <RitualsCard state={state} dateKey={dateKey} />
-    <DeciderSection dateKey={dateKey} />
+    </aside>
+    <div className="daily-support">
+      <details className="support-section"><summary><span>Evening reflection<small>A moment to close out your day</small></span><span aria-hidden="true">+</span></summary><NightlyCheck state={state} dateKey={dateKey} /></details>
+      <details className="support-section"><summary><span>Think through a decision<small>Find a next step aligned with your values</small></span><span aria-hidden="true">+</span></summary><DeciderSection dateKey={dateKey} /></details>
+    </div>
   </main>;
 }
 
@@ -947,7 +894,6 @@ function StrengthView({ state, dateKey }: { state: AppState; dateKey: string }) 
           const entry = draft[exerciseIndex];
           if (!entry) return null;
           const recommendation = state.upcoming?.recommendations.find((item) => item.name === exercise.name);
-          const image = exerciseImages[exercise.name];
           return (
             <article className={`exercise ${entry.pain ? "pain" : ""}`} key={exercise.name}>
               <header>
@@ -957,7 +903,6 @@ function StrengthView({ state, dateKey }: { state: AppState; dateKey: string }) 
                 </div>
                 <button className="pain-button" aria-pressed={entry.pain} onClick={() => updateExercise(exerciseIndex, { ...entry, pain: !entry.pain })}>{entry.pain ? "PAIN FLAGGED" : "PAIN?"}</button>
               </header>
-              {image && <a className="exercise-image" href={image.source} target="_blank" rel="noreferrer" aria-label={`Open source for ${exercise.name} demonstration photo`}><img src={image.src} alt={image.alt} /><span>FORM DEMO</span></a>}
               <p className="cue">{exercise.cue}</p>
               {exercise.regressions && <p className="regression"><strong>Easier:</strong> {exercise.regressions}</p>}
               {recommendation && <p className={`recommendation ${recommendation.outcome}`}>{recommendation.notice}</p>}
@@ -1254,25 +1199,29 @@ function TrainView({ state, dateKey }: { state: AppState; dateKey: string }) {
 
 export function App() {
   const [tab, setTab] = useState<Tab>("focus");
-  const dateKey = localDateKey();
+  const [dateKey, setDateKey] = useState(localDateKey);
+  useEffect(() => {
+    const updateDay = () => setDateKey(localDateKey());
+    const interval = window.setInterval(updateDay, 30_000);
+    window.addEventListener("focus", updateDay);
+    return () => { window.clearInterval(interval); window.removeEventListener("focus", updateDay); };
+  }, []);
   const stateQuery = useQuery({ queryKey: ["app-state", dateKey], queryFn: () => api.getAppState({ dateKey }) });
   if (stateQuery.isPending) return <div className="loading"><div className="loading-bar" /><p>Loading today…</p></div>;
-  if (stateQuery.error || !stateQuery.data) return <div className="error-state"><h1>Couldn’t load the log</h1><p>{String(stateQuery.error)}</p><button onClick={() => stateQuery.refetch()}>Try again</button></div>;
+  if (stateQuery.error || !stateQuery.data) return <div className="error-state" role="alert"><h1>Let’s reconnect.</h1><p>Your day couldn’t load. Check your connection and try again.</p><button onClick={() => stateQuery.refetch()}>Try again</button></div>;
   const state = stateQuery.data;
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">Skip to content</a>
+      <header className="app-topbar"><div className="app-brand"><span className="brand-mark" aria-hidden="true">↗</span><span className="brand-copy">Daylight<small>Your personal rhythm</small></span></div><time className="app-date" dateTime={dateKey}>{new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date(`${dateKey}T12:00:00`))}</time></header>
+      <div className="app-workspace" id="main-content" tabIndex={-1}>
       {tab === "focus" && <FocusView state={state} dateKey={dateKey} />}
       {tab === "train" && <TrainView state={state} dateKey={dateKey} />}
       {tab === "history" && <HistoryView state={state} />}
       {tab === "trends" && <TrendsView state={state} />}
       {tab === "higher" && <HigherSelfView dateKey={dateKey} />}
-      <nav className="bottom-nav" aria-label="Primary navigation">
-        <button className={tab === "focus" ? "active" : ""} onClick={() => setTab("focus")}><span aria-hidden="true">◎</span>Focus</button>
-        <button className={tab === "train" ? "active" : ""} onClick={() => setTab("train")}><span aria-hidden="true">◆</span>Train</button>
-        <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}><span aria-hidden="true">≡</span>Log</button>
-        <button className={tab === "trends" ? "active" : ""} onClick={() => setTab("trends")}><span aria-hidden="true">⌁</span>Trends</button>
-        <button className={tab === "higher" ? "active" : ""} onClick={() => setTab("higher")}><span aria-hidden="true">◉</span>Higher Self</button>
-      </nav>
+      </div>
+      <AppNavigation tab={tab} onChange={setTab} />
     </div>
   );
 }
