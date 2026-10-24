@@ -113,6 +113,20 @@
       "when": 1792082564845,
       "tag": "0016_add_higher_self_and_decider",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1792856885823,
+      "tag": "0017_add_journal_entries_and_reminder",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1792865485261,
+      "tag": "0018_add_mindsera_journal_studio",
+      "breakpoints": true
     }
   ]
 }

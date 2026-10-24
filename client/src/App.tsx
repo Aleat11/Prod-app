@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type ApiResponse } from "./api";
 import { DeciderSection, HigherSelfView } from "./HigherSelfView";
+import { JournalView } from "./JournalView";
 import pushUpImage from "./assets/push-up.jpg";
 import chairDipImage from "./assets/chair-dip.jpg";
 import pikePushUpImage from "./assets/pike-push-up.jpg";
@@ -29,6 +30,10 @@ import dumbbellCurlImage from "./assets/dumbbell-curl.jpg";
 import calfRaiseImage from "./assets/single-leg-calf-raise.jpg";
 import inclinePushUpImage from "./assets/incline-push-up.jpg";
 import declinePushUpImage from "./assets/decline-push-up.jpg";
+import hammerCurlImage from "./assets/hammer-curl.jpg";
+import dumbbellRdlImage from "./assets/dumbbell-rdl.webp";
+import standingCalfRaiseImage from "./assets/standing-calf-raise.jpg";
+import aerobicWalkImage from "./assets/aerobic-walk.webp";
 
 type AppState = ApiResponse<typeof api, "getAppState">;
 type FocusState = ApiResponse<typeof api, "getFocusState">;
@@ -83,7 +88,74 @@ const exerciseImages: Partial<Record<string, { src: string; alt: string; source:
   "Single-Leg Calf Raise": { src: calfRaiseImage, alt: "Illustration of a single-leg calf raise on a step with wall support, calf highlighted", source: "https://workoutguru.fit/exercises/single-leg-calf-raise-off-step-video-exercise-guide-tips-505212/" },
   "Push-Up (Hands Elevated)": { src: inclinePushUpImage, alt: "Athlete demonstrating an incline push-up with hands elevated on a raised surface", source: "https://fitnessvolt.com/category/training/body-mechanics/page/5/" },
   "Push-Up (Feet Elevated)": { src: declinePushUpImage, alt: "Illustration of a decline push-up with feet elevated on a bench", source: "https://www.sfd.pl/post-p4117425.html" },
+  "DB Hammer Curl": { src: hammerCurlImage, alt: "Athlete demonstrating a dumbbell hammer curl with a neutral grip, dumbbells at shoulder height", source: "https://do6eyjibs3jse.cloudfront.net/articles/hammer-curl-guide" },
+  "Dumbbell Hammer Curl": { src: hammerCurlImage, alt: "Athlete demonstrating a dumbbell hammer curl with a neutral grip, dumbbells at shoulder height", source: "https://do6eyjibs3jse.cloudfront.net/articles/hammer-curl-guide" },
+  "DB Romanian Deadlift": { src: dumbbellRdlImage, alt: "Athlete demonstrating a dumbbell Romanian deadlift, hinged at the hips with a flat back and dumbbells at knee height", source: "https://www.eatthis.com/news-this-10-minute-total-body-workout-will-transform-your-body-fast/" },
+  "Dumbbell Romanian Deadlift": { src: dumbbellRdlImage, alt: "Athlete demonstrating a dumbbell Romanian deadlift, hinged at the hips with a flat back and dumbbells at knee height", source: "https://www.eatthis.com/news-this-10-minute-total-body-workout-will-transform-your-body-fast/" },
+  "Standing DB Calf Raise": { src: standingCalfRaiseImage, alt: "Illustration of a standing dumbbell calf raise on a step, start position and raised on the toes, calves highlighted", source: "https://picmasa.com/explore/barbell-calf-raises" },
+  "Standing Calf Raise": { src: standingCalfRaiseImage, alt: "Illustration of a standing dumbbell calf raise on a step, start position and raised on the toes, calves highlighted", source: "https://picmasa.com/explore/barbell-calf-raises" },
 };
+
+// Form tips written for his build: 6'0", 153 lb (a lean frame with long
+// levers), 43 years old. Long-lever angles, tendon-friendly tempos, and
+// recovery notes — never heavier-for-its-own-sake advice.
+const exerciseTips: Partial<Record<string, string[]>> = {
+  "Push-Up": ["At 6'0\" your levers are long: keep hands a touch wider than shoulders and brace your glutes so your hips never sag.", "At 43, warm the wrists and shoulders for a minute first — cold tendons are where tweaks come from."],
+  "Push-Up (Hands Elevated)": ["Long torso, long levers: the higher the surface, the more upright you are — pick the height where the last two reps are hard but clean.", "Keep one straight line head to heels; don't let your hips drop as you tire."],
+  "Push-Up (Feet Elevated)": ["This loads the upper chest and shoulders harder — keep the 3-second lowering honest and stop before your shoulders roll forward.", "If your wrists complain, use dumbbell handles on the floor as push-up grips."],
+  "Chair Dip": ["Keep the range small and pain-free — deep dips stress the front of the shoulder, and at 43 shoulders bill you later for range you forced.", "Shoulders down away from your ears the whole set; if you feel a pinch in front, stop the set."],
+  "Pike Push-Up": ["Walk your feet in until your hips are high; press through the whole palm, not just the heel of the hand.", "This is your overhead-press builder while loads are light — own the lowering."],
+  "Bodyweight Squat": ["At 6'0\", sit back and down between your heels and let your knees track over your toes; a slightly wider stance usually fits long femurs better.", "Heels down. If they lift, hold a doorframe and work the deep squat hold in the flexibility block."],
+  "Reverse Lunge": ["Take a long step back — long legs need the room — and keep most of your weight on the front foot.", "Hold a chair until balance is automatic; balance work doubles as ankle insurance at 43."],
+  "Glute Bridge": ["Posterior tilt first (ribs down), then squeeze. A lean frame builds glutes by tension, not by rushing reps.", "Pause a full second at the top of every rep."],
+  "Plank": ["Quality over the clock: the set ends when your hips sag, not when the timer says so.", "Breathe behind the brace — short exhales keep the brace without spiking tension."],
+  "Bird Dog": ["Move slow enough that a cup of water on your lower back wouldn't spill.", "Reach long, not high — length is the point for a tall frame."],
+  "Rear-Foot-Elevated Split Squat": ["Your money leg exercise. Set the chair behind you, take a long enough stance that your front shin stays near vertical, and own the 3-second lowering.", "Long femurs tip the torso forward — a slight forward lean is fine if your back stays flat and the front heel stays down.", "At 43, knees like gradual loading: master bodyweight reps before chasing the backpack."],
+  "Bulgarian Split Squat": ["Your money leg exercise. Set the chair behind you, take a long enough stance that your front shin stays near vertical, and own the 3-second lowering.", "Long femurs tip the torso forward — a slight forward lean is fine if your back stays flat and the front heel stays down."],
+  "Dead Hang": ["Grip, shoulders down away from your ears, ribs tucked. Build the hang before any dynamic work on the door bar.", "At 153 lb on a 6-foot frame, your grip-to-bodyweight ratio is in your favor — this ladder should move."],
+  "Scap Pull": ["Think shoulder blades into your back pockets. No elbow bend — if your elbows bend, it's an arm exercise, not a scap pull.", "This is the shoulder-health rep that keeps chin-up volume safe at 43."],
+  "Chin-Up": ["Strict and full range: dead hang to chin over. Half reps don't count on this ladder.", "Stop the set when the lowering gets sloppy — tendons at 43 prefer one clean set to three junk ones."],
+  "Chin-Up Negatives": ["Five full seconds down, every rep. Jump or step back to the top instead of climbing tired.", "Negatives are heavy tendon work — if elbows feel hot the next day, hold this stage another week."],
+  "Assisted Chin-Up": ["Use the minimum leg help that lets you finish the rep tall. Less help each week is the progression.", "Keep the free leg bent and still so the help stays honest."],
+  "Dumbbell Floor Press": ["The floor is your depth gauge — upper arms touch, pause, press. That pause is joint-friendly pressing for 43-year-old shoulders.", "Long arms mean a long press path: keep wrists stacked over elbows and don't flare past about 45 degrees."],
+  "DB Floor Press": ["The floor is your depth gauge — upper arms touch, pause, press. That pause is joint-friendly pressing for 43-year-old shoulders.", "Long arms mean a long press path: keep wrists stacked over elbows and don't flare past about 45 degrees."],
+  "Single-Leg Romanian Deadlift": ["Hinge, don't squat: hips travel back, the standing knee stays soft, the dumbbell slides down your thigh.", "Keep a fingertip on the wall until balance is boring — at 43, ankle and hip stability is the real training effect here."],
+  "DB Romanian Deadlift": ["Hinge, don't squat: hips travel back, knees stay soft, dumbbells slide down your thighs until your hamstrings load.", "Long back, long levers: brace hard before every rep and stop the set when your lower back starts doing the lifting."],
+  "Dumbbell Romanian Deadlift": ["Hinge, don't squat: hips travel back, knees stay soft, dumbbells slide down your thighs until your hamstrings load.", "Long back, long levers: brace hard before every rep and stop the set when your lower back starts doing the lifting."],
+  "Dumbbell Lateral Raise": ["Raise to shoulder height with a slight bend and a turned-out thumb side — friendlier on 43-year-old shoulders than pouring-the-jug form.", "If you have to swing it up, it's too heavy. Your adjustable minimum is 10 lb, so slow the tempo instead of adding load."],
+  "DB Lateral Raise": ["Raise to shoulder height with a slight bend and a turned-out thumb side — friendlier on 43-year-old shoulders than pouring-the-jug form.", "If you have to swing it up, it's too heavy. Your adjustable minimum is 10 lb, so slow the tempo instead of adding load."],
+  "Dead Bug": ["Exhale fully before each rep — ribs down is what makes this a core exercise instead of a back exercise.", "Slow reps beat more reps. If your lower back arches, shorten the reach."],
+  "Hanging Knee Raise": ["No swinging: if you swing, reset from a dead stop. Control is the whole exercise.", "Curl your pelvis up at the top instead of just lifting your knees."],
+  "Goblet Squat": ["Hold the 25 close to your chest and let your elbows track inside your knees at the bottom — it wedges your long frame into a good position.", "The 3-second lowering is the growth signal at this load; don't rush the easy part."],
+  "Dumbbell Overhead Press": ["Squeeze your glutes and tuck your ribs before you press — long levers plus an arched back is how lower backs get sore.", "Press in a slight arc and finish with biceps by your ears, not out in front."],
+  "Standing DB Overhead Press": ["Squeeze your glutes and tuck your ribs before you press — long levers plus an arched back is how lower backs get sore.", "Press in a slight arc and finish with biceps by your ears, not out in front."],
+  "One-Arm Dumbbell Row": ["Set your back flat like a table, then row to your hip pocket, not your chest.", "Full stretch at the bottom, hard squeeze at the top — at 153 lb, back thickness comes from range and control, not ego loads."],
+  "Single-Arm DB Row": ["Set your back flat like a table, then row to your hip pocket, not your chest.", "Full stretch at the bottom, hard squeeze at the top — at 153 lb, back thickness comes from range and control, not ego loads."],
+  "Dumbbell Hip Thrust": ["Chin tucked, ribs down, and thrust by squeezing your glutes — not by arching your lower back.", "Pause at the top until you feel the glutes, not your hamstrings, doing the work."],
+  "Overhead Triceps Extension": ["Keep elbows pointing forward and close together; flared elbows turn this into a shoulder complaint.", "Lower slowly behind your head — elbow tendons at 43 like tempo more than load."],
+  "Overhead DB Triceps Extension": ["Keep elbows pointing forward and close together; flared elbows turn this into a shoulder complaint.", "Lower slowly behind your head — elbow tendons at 43 like tempo more than load."],
+  "Dumbbell Curl": ["Pin your elbows at your ribs and curl without your shoulders rolling forward.", "You're building arms on a lean frame: full range and a 2-second squeeze beat swinging a heavier bell."],
+  "DB Hammer Curl": ["Neutral grip, thumbs up the whole way — this hits the forearm and the outer arm that regular curls miss.", "Elbows pinned, no torso swing. At 43 your elbows will thank you for strict reps."],
+  "Dumbbell Hammer Curl": ["Neutral grip, thumbs up the whole way — this hits the forearm and the outer arm that regular curls miss.", "Elbows pinned, no torso swing. At 43 your elbows will thank you for strict reps."],
+  "Single-Leg Calf Raise": ["Full stretch at the bottom, full pause at the top — calves grow on range, not bounce.", "One set done slowly beats three rushed; Achilles tendons at 43 want the pause, not the bounce."],
+  "Standing DB Calf Raise": ["Full stretch at the bottom, full pause at the top — calves grow on range, not bounce.", "Hold a wall for balance so the calf, not your balance, is the limit."],
+  "Standing Calf Raise": ["Full stretch at the bottom, full pause at the top — calves grow on range, not bounce.", "Hold a wall for balance so the calf, not your balance, is the limit."],
+};
+
+const flexibilityTips: Record<string, string> = {
+  "Half-kneeling hip flexor stretch + quad pull": "Tuck your tailbone and squeeze the down-side glute before you shift forward. At 6'0\" with long legs, your hip flexors shorten fast from sitting — this is the stretch that buys back your split squat and your stride.",
+  "Lying hamstring stretch": "Keep the down leg flat and pull gently — a strap or towel around the foot is fine. Breathe out and let the leg come a little closer each round instead of forcing it.",
+  "Calf stretch against wall (straight knee)": "Heel glued down, toes straight ahead. Straight knee hits the upper calf — the one your calf raises and split squats load.",
+  "Doorway chest stretch": "Elbow at shoulder height, then turn away slowly. After floor press and push-up volume, this keeps 43-year-old shoulders opening instead of rounding forward.",
+  "Deep squat hold": "Heels down, chest up, elbows prying your knees out. Hold the doorframe as long as you need — this hold is your squat depth insurance.",
+  "Dead hang": "Same bar rules as training: check the bar is seated, static hang first. Let your shoulders creep up to your ears, then pull them back down — that reset is shoulder health.",
+};
+
+const aerobicTips: string[] = [
+  "Talk test the whole way: full sentences, no gasping. At 153 lb and 6'0\", your engine work is about recovery capacity, not burning calories you need for building.",
+  "Low-impact first — walk, incline walk, bike, row. At 43, joints collect the bill for pounding long after the workout ends.",
+  "Refuel after: aerobic days are not diet days. Hit your protein and your surplus so these sessions make strength days better, not smaller.",
+];
 
 function localDateKey(): string {
   const now = new Date();
@@ -473,7 +545,7 @@ function WakeTracker({ focus, dateKey }: { focus: FocusState | undefined; dateKe
   );
 }
 
-function FocusView({ state, dateKey }: { state: AppState; dateKey: string }) {
+function FocusView({ state, dateKey, onGoJournal }: { state: AppState; dateKey: string; onGoJournal: () => void }) {
   const queryClient = useQueryClient();
   const focusQuery = useQuery({ queryKey: ["focus-state", dateKey], queryFn: () => api.getFocusState({ dateKey }) });
   const focus = focusQuery.data;
@@ -487,6 +559,8 @@ function FocusView({ state, dateKey }: { state: AppState; dateKey: string }) {
   const [now, setNow] = useState(Date.now());
   const [ratingOpen, setRatingOpen] = useState(false);
   const [focusRating, setFocusRating] = useState(4);
+  const [eveningOpen, setEveningOpen] = useState(false);
+  const [deciderOpen, setDeciderOpen] = useState(false);
 
   const [planSnapshot, setPlanSnapshot] = useState<{ frog: string; reason: string; taskTwo: string; taskThree: string } | null>(null);
   const [editorOpenedByUser, setEditorOpenedByUser] = useState(false);
@@ -596,27 +670,43 @@ function FocusView({ state, dateKey }: { state: AppState; dateKey: string }) {
   const middayTripwire = hour >= 13 && focus && focus.plan.frog && !focus.plan.frogStartedAt && !focus.plan.frogCompleted;
   const weekMinutes = focus?.lastSevenDays.reduce((sum, day) => sum + day.minutes, 0) ?? 0;
   const jumpToCheckin = () => {
-    const card = document.getElementById("wellness-checkin");
-    const toggle = card?.querySelector<HTMLButtonElement>(".wellness-header");
-    if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
-    card?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setEveningOpen(true);
+    window.setTimeout(() => {
+      const card = document.getElementById("wellness-checkin");
+      const toggle = card?.querySelector<HTMLButtonElement>(".wellness-header");
+      if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
+      card?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
   };
   const recoveryPrompt = state.wellness.today && (state.wellness.today.energy <= 2 || state.wellness.today.sleepHours < 6)
     ? `Energy is ${state.wellness.today.energy}/5 after ${state.wellness.today.sleepHours} hours of sleep. Check in before you force the pace.`
     : null;
+  const nowHHMM = `${String(new Date().getHours()).padStart(2, "0")}:${String(new Date().getMinutes()).padStart(2, "0")}`;
+  const journalReminderDue = state.journal.prefs.reminderEnabled && !state.journal.today && nowHHMM >= state.journal.prefs.reminderTime;
+
+  const ritualsDoneCount = ritualMeta.filter((ritual) => state.rituals.today[ritual.key]).length;
+  const energyToday = state.wellness.today?.energy;
 
   return <main className="page focus-page">
+    <div className="today-topbar">
+      <span className="date-badge">{new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" }).format(new Date(`${dateKey}T12:00:00`))}</span>
+      <span className="needle-pill"><b>{focus?.todayNeedleMinutes ?? 0}</b><span>needle min</span></span>
+    </div>
     <section className="focus-masthead">
-      <div><p className="eyebrow">TODAY · MOVE THE NEEDLE</p><h1>{focus?.plan.frogCompleted ? "Done, not busy." : "Do the hard thing first."}</h1></div>
-      <div className="needle-stat"><b>{focus?.todayNeedleMinutes ?? 0}</b><span>needle min</span></div>
+      <p className="eyebrow">Today · move the needle</p>
+      <h1 className="hero-line">{focus?.plan.frogCompleted ? "Done, not busy." : "Do the hard thing first."}</h1>
+      <p className="hero-sub">One meaningful priority. A little movement. Time for yourself.</p>
     </section>
 
-    <QuickCapture state={state} focus={focus} dateKey={dateKey} onCheckin={jumpToCheckin} />
-
-    <WakeTracker focus={focus} dateKey={dateKey} />
+    <div className="stat-row" aria-label="Today at a glance">
+      <div className="stat-card"><span>Focused</span><div className="stat-value"><b>{focus?.todayNeedleMinutes ?? 0}</b><small>min</small></div><small>Needle minutes today</small></div>
+      <div className="stat-card"><span>Daily rituals</span><div className="stat-value"><b>{ritualsDoneCount}</b><small>/ {ritualMeta.length}</small></div><small>{ritualsDoneCount === ritualMeta.length ? "All of them, done" : "Step by step"}</small></div>
+      <div className="stat-card"><span>Energy</span><div className="stat-value">{energyToday != null ? <><b className="good">{energyToday}</b><small>/ 5</small></> : <b>—</b>}</div><small>{energyToday != null ? "From your check-in" : "Check in below"}</small></div>
+    </div>
 
     {!state.wellness.today && <aside className="proactive-check" aria-label="Proactive check-in"><div><strong>Don’t run today on yesterday’s data.</strong><span>Thirty seconds: sleep, energy, stress, soreness.</span></div><button onClick={jumpToCheckin}>Check in now</button></aside>}
     {recoveryPrompt && <aside className="proactive-check recovery" aria-label="Recovery check-in"><div><strong>Recovery is the constraint today.</strong><span>{recoveryPrompt}</span></div><button onClick={jumpToCheckin}>Review</button></aside>}
+    {journalReminderDue && <aside className="proactive-check journal-nudge" aria-label="Journal reminder"><div><strong>Journal reminder · {formatTime12h(state.journal.prefs.reminderTime)}</strong><span>Today's prompt is waiting: “{state.journal.promptToday}” Five minutes, plain words.</span></div><button onClick={onGoJournal}>Write it</button></aside>}
     {middayTripwire && focus && <div className="tripwire" role="status"><div><strong>Midday check: “{focus.plan.frog}” hasn’t started.</strong><span>{focus.parkingLot.length > 0 ? `${focus.parkingLot.length} side task${focus.parkingLot.length === 1 ? "" : "s"} already parked (${focus.parkingLot.slice(0, 2).map((item) => item.text).join(", ")}${focus.parkingLot.length > 2 ? "…" : ""}) and the frog still hasn’t moved. Start it before another side task wins.` : "The frog you locked this morning is still untouched. Start it before another side task wins."}</span></div><button onClick={() => startFrog.mutate()} disabled={startFrog.isPending} aria-label={`Start ${focus.plan.frog}`}>Start now</button></div>}
 
     <section className={`frog-card ${focus?.plan.frogCompleted ? "complete" : ""}`} aria-labelledby="frog-heading">
@@ -655,8 +745,14 @@ function FocusView({ state, dateKey }: { state: AppState; dateKey: string }) {
       {ratingOpen && <div className="rating-panel"><span>How focused were you?</span><div>{[1,2,3,4,5].map((value) => <button key={value} className={focusRating === value ? "selected" : ""} onClick={() => setFocusRating(value)} aria-label={`Focus rating ${value} out of 5`}>{value}</button>)}</div><button className="save-block" onClick={() => saveBlock.mutate()} disabled={saveBlock.isPending}>{saveBlock.isPending ? "Saving…" : "Save block"}</button></div>}
     </section>}
 
+    <QuickCapture state={state} focus={focus} dateKey={dateKey} onCheckin={jumpToCheckin} />
+
+    <WakeTracker focus={focus} dateKey={dateKey} />
+
+    <RitualsCard state={state} dateKey={dateKey} />
+
     <section className="parking-card" aria-labelledby="parking-heading">
-      <div className="section-line"><div><p className="eyebrow">DON’T DO IT. DON’T LOSE IT.</p><h2 id="parking-heading">Side-task parking lot</h2></div><span className="parking-count">{focus?.parkingLot.length ?? 0}</span></div>
+      <div className="section-line"><div><p className="eyebrow">Clear your mind, keep focus</p><h2 id="parking-heading">Save for later</h2></div><span className="parking-count">{focus?.parkingLot.length ?? 0}</span></div>
       <form className="parking-entry" onSubmit={(event) => { event.preventDefault(); const text = parkingDraft.trim(); if (text) addParking.mutate(text); }}>
         <input value={parkingDraft} onChange={(event) => setParkingDraft(event.target.value)} maxLength={180} placeholder="Park the urge here" aria-label="Side task to park" />
         <button disabled={!parkingDraft.trim() || addParking.isPending}>Park it</button>
@@ -669,10 +765,22 @@ function FocusView({ state, dateKey }: { state: AppState; dateKey: string }) {
       <div className="week-bars" aria-label={`${weekMinutes} focus minutes over the last seven days`}>{focus?.lastSevenDays.map((day) => <span key={day.dateKey} style={{ height: `${Math.max(6, Math.min(100, day.minutes / 90 * 100))}%` }} title={`${day.dateKey}: ${day.minutes} minutes`} />)}</div>
     </section>
 
-    <WellnessCheckin state={state} dateKey={dateKey} />
-    <NightlyCheck state={state} dateKey={dateKey} />
-    <RitualsCard state={state} dateKey={dateKey} />
-    <DeciderSection dateKey={dateKey} />
+    <button type="button" className="accordion-row" aria-expanded={eveningOpen} onClick={() => setEveningOpen((value) => !value)}>
+      <span><h3>Evening check-in</h3><p>{state.wellness.today || state.nightly?.today ? "Saved — tap to review or update" : "How today went, in thirty seconds"}</p></span>
+      <span className={`acc-state ${state.wellness.today || state.nightly?.today ? "done" : ""}`} aria-hidden="true">{state.wellness.today || state.nightly?.today ? "✓" : eveningOpen ? "−" : "+"}</span>
+    </button>
+    {eveningOpen && <div className="accordion-panel">
+      <WellnessCheckin state={state} dateKey={dateKey} />
+      <NightlyCheck state={state} dateKey={dateKey} />
+    </div>}
+
+    <button type="button" className="accordion-row" aria-expanded={deciderOpen} onClick={() => setDeciderOpen((value) => !value)}>
+      <span><h3>Think through a decision</h3><p>Your Higher Self picks, from your values</p></span>
+      <span className="acc-state" aria-hidden="true">{deciderOpen ? "−" : "+"}</span>
+    </button>
+    {deciderOpen && <div className="accordion-panel">
+      <DeciderSection dateKey={dateKey} />
+    </div>}
   </main>;
 }
 
@@ -768,7 +876,7 @@ function FlexibilityBlock({ state, dateKey }: { state: AppState; dateKey: string
         <span className="ritual-total">{done ? "Done" : "Open"}</span>
       </div>
       <div className="flex-list">
-        {state.flexibilityBlock.map((item) => <div className="flex-row" key={item.name}><strong>{item.name}</strong><small>{duration === 60 ? item.detail.replace("30s", "60s") : item.detail}</small></div>)}
+        {state.flexibilityBlock.map((item) => <div className="flex-row" key={item.name}><strong>{item.name}</strong><small>{duration === 60 ? item.detail.replace("30s", "60s") : item.detail}</small>{flexibilityTips[item.name] && <small className="flex-tip">{flexibilityTips[item.name]}</small>}</div>)}
       </div>
       <div className="flex-actions">
         <div className="duration-toggle" role="group" aria-label="Stretch hold duration">
@@ -959,6 +1067,7 @@ function StrengthView({ state, dateKey }: { state: AppState; dateKey: string }) 
               </header>
               {image && <a className="exercise-image" href={image.source} target="_blank" rel="noreferrer" aria-label={`Open source for ${exercise.name} demonstration photo`}><img src={image.src} alt={image.alt} /><span>FORM DEMO</span></a>}
               <p className="cue">{exercise.cue}</p>
+              {exerciseTips[exercise.name] && <div className="exercise-tips"><span>Tips for your build · 6'0" · 153 lb · 43</span><ul>{exerciseTips[exercise.name]!.map((tip) => <li key={tip}>{tip}</li>)}</ul></div>}
               {exercise.regressions && <p className="regression"><strong>Easier:</strong> {exercise.regressions}</p>}
               {recommendation && <p className={`recommendation ${recommendation.outcome}`}>{recommendation.notice}</p>}
               {entry.pain && <p className="pain-notice">Progression frozen. Rest this movement, and consider a doctor or physio if pain persists.</p>}
@@ -973,9 +1082,10 @@ function StrengthView({ state, dateKey }: { state: AppState; dateKey: string }) 
       <FlexibilityBlock state={state} dateKey={dateKey} />
 
       <section className="eat-card">
-        <p className="eyebrow">EATING TO GROW</p>
+        <p className="eyebrow">EATING TO GROW · YOUR BUILD: 6'0" · 153 LB · AGE 43</p>
         <h2>Give the work something to build with.</h2>
-        <ul><li><b>+250–350 cal</b> per day over maintenance</li><li><b>110–155g protein</b> per day</li><li><b>Weigh in weekly</b> under similar conditions</li></ul>
+        <p className="build-note">At 6'0" and 153 lb you are lean for your height — the limiter is fuel and recovery, not effort. Long levers and 43-year-old tendons both argue for the same plan: a small surplus, protein every day, tempos you control, and deload weeks you actually take.</p>
+        <ul><li><b>+250–350 cal</b> per day over maintenance</li><li><b>110–155g protein</b> per day (about 0.7–1.0g per pound at 153 lb)</li><li><b>Weigh in weekly</b> under similar conditions — target a slow climb, roughly 0.5 lb a week</li><li><b>Sleep is the supplement:</b> under 6 hours, expect the next session to feel a week older</li></ul>
       </section>
 
       <div className="finish-panel">
@@ -1008,7 +1118,9 @@ function AerobicView({ state, dateKey }: { state: AppState; dateKey: string }) {
       </aside>
       <section className="aerobic-card">
         <h2>Steady aerobic work</h2>
+        <a className="exercise-image aerobic-image" href="https://ghc.health/" target="_blank" rel="noreferrer" aria-label="Open source for steady aerobic work photo"><img src={aerobicWalkImage} alt="Man doing steady aerobic exercise outdoors on a tree-lined path" /><span>STEADY PACE</span></a>
         <p>Keep it conversational: you should be able to talk in full sentences the whole way. Walk, ride, row, swim — your pick. This is the engine work that makes the strength days recoverable.</p>
+        <div className="exercise-tips"><span>Tips for your build · 6'0" · 153 lb · 43</span><ul>{aerobicTips.map((tip) => <li key={tip}>{tip}</li>)}</ul></div>
         <button className="save-checkin" disabled={mutation.isPending} onClick={() => mutation.mutate(!state.aerobicDoneToday)} aria-pressed={state.aerobicDoneToday}>{state.aerobicDoneToday ? "Aerobic done ✓ · undo" : "Mark aerobic done"}</button>
         {mutation.isError && <p className="inline-error" role="alert">Couldn’t save yet. Try again.</p>}
       </section>
@@ -1057,41 +1169,11 @@ function TodayView({ state, dateKey }: { state: AppState; dateKey: string }) {
   return <StrengthView state={state} dateKey={dateKey} />;
 }
 
-function formatTakenAt(value: string): string {
-  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T12:00:00` : value;
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) return value;
-  return formatDate(date.toISOString());
-}
-
-function formatScore(value: number): string {
-  return Number.isInteger(value) ? String(value) : String(Math.round(value * 10) / 10);
-}
-
-function HistoryView({ state }: { state: AppState }) {
-  const zephyrResults = state.zephyrResults ?? [];
+function HistoryView({ state, dateKey }: { state: AppState; dateKey: string }) {
   return (
     <main className="page history-page">
-      <section className="page-heading"><p className="eyebrow">YOUR RECORD</p><h1>History</h1><p>Sessions and daily practices, kept separate.</p></section>
-      <section className="history-section" aria-labelledby="zephyr-heading">
-        <h2 id="zephyr-heading">Zephyr results</h2>
-        {zephyrResults.length === 0 ? <p className="empty">No Zephyr results imported yet. They will appear here once imported from Zephyr.</p> : zephyrResults.map((result) => (
-          <article className="zephyr-result-row" key={`${result.testId}-${result.takenAt}-${result.id}`}>
-            <div className="zephyr-result-head">
-              <div>
-                <h3>{result.testTitle}</h3>
-                <p className="zephyr-category">{result.category}</p>
-              </div>
-              <div className="zephyr-score"><b>{formatScore(result.score)}</b><span>/ {formatScore(result.maxScore)}</span></div>
-            </div>
-            <div className="zephyr-band">
-              <span className="zephyr-band-label">{result.bandLabel}</span>
-              <time>{formatTakenAt(result.takenAt)}</time>
-            </div>
-            {result.bandSummary && <p className="zephyr-summary">{result.bandSummary}</p>}
-          </article>
-        ))}
-      </section>
+      <section className="page-heading"><p className="eyebrow">Your record</p><h1>Journal</h1><p>Write it down, go deeper, let the Minds read it back. Then read what the days add up to.</p></section>
+      <JournalView state={state} dateKey={dateKey} />
       <section className="history-section">
         <h2>Daily check-ins</h2>
         {state.wellness.history.length === 0 ? <p className="empty">Your first check-in will land here.</p> : state.wellness.history.map((day) => (
@@ -1181,7 +1263,7 @@ function TrendsView({ state }: { state: AppState }) {
   const latest = wellness[wellness.length - 1];
   const maxSets = Math.max(1, ...Array.from(workoutSets.values()));
   return <main className="page trends-page">
-    <section className="page-heading"><p className="eyebrow">RECOVERY + TRAINING</p><h1>Trends</h1><p>Your check-ins beside the work you completed. Patterns are associations, not diagnoses.</p></section>
+    <section className="page-heading"><p className="eyebrow">Recovery + training</p><h1>Insights</h1><p>Your check-ins beside the work you completed. Patterns are associations, not diagnoses.</p></section>
     <section className="metric-grid" aria-label="Wellness trend charts">
       <MiniTrend label="Sleep" valueLabel={latest ? `${latest.sleepHours} hr` : "—"} maxValue={12} points={wellness.map((day) => ({ dateKey: day.dateKey, value: day.sleepHours }))} />
       <MiniTrend label="Energy" valueLabel={latest ? `${latest.energy}/5` : "—"} maxValue={5} points={wellness.map((day) => ({ dateKey: day.dateKey, value: day.energy }))} />
@@ -1261,17 +1343,17 @@ export function App() {
   const state = stateQuery.data;
   return (
     <div className="app-shell">
-      {tab === "focus" && <FocusView state={state} dateKey={dateKey} />}
+      {tab === "focus" && <FocusView state={state} dateKey={dateKey} onGoJournal={() => setTab("history")} />}
       {tab === "train" && <TrainView state={state} dateKey={dateKey} />}
-      {tab === "history" && <HistoryView state={state} />}
+      {tab === "history" && <HistoryView state={state} dateKey={dateKey} />}
       {tab === "trends" && <TrendsView state={state} />}
       {tab === "higher" && <HigherSelfView dateKey={dateKey} />}
       <nav className="bottom-nav" aria-label="Primary navigation">
-        <button className={tab === "focus" ? "active" : ""} onClick={() => setTab("focus")}><span aria-hidden="true">◎</span>Focus</button>
-        <button className={tab === "train" ? "active" : ""} onClick={() => setTab("train")}><span aria-hidden="true">◆</span>Train</button>
-        <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}><span aria-hidden="true">≡</span>Log</button>
-        <button className={tab === "trends" ? "active" : ""} onClick={() => setTab("trends")}><span aria-hidden="true">⌁</span>Trends</button>
-        <button className={tab === "higher" ? "active" : ""} onClick={() => setTab("higher")}><span aria-hidden="true">◉</span>Higher Self</button>
+        <button className={tab === "focus" ? "active" : ""} aria-current={tab === "focus" ? "page" : undefined} onClick={() => setTab("focus")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>Today</button>
+        <button className={tab === "train" ? "active" : ""} aria-current={tab === "train" ? "page" : undefined} onClick={() => setTab("train")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6.5 6.5v11" /><path d="M3.5 9v6" /><path d="M17.5 6.5v11" /><path d="M20.5 9v6" /><line x1="6.5" y1="12" x2="17.5" y2="12" /></svg>Training</button>
+        <button className={tab === "history" ? "active" : ""} aria-current={tab === "history" ? "page" : undefined} onClick={() => setTab("history")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>Journal</button>
+        <button className={tab === "trends" ? "active" : ""} aria-current={tab === "trends" ? "page" : undefined} onClick={() => setTab("trends")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>Insights</button>
+        <button className={tab === "higher" ? "active" : ""} aria-current={tab === "higher" ? "page" : undefined} onClick={() => setTab("higher")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 2a5 5 0 0 1 5 5c0 4-5 10-5 10S7 11 7 7a5 5 0 0 1 5-5z" /><circle cx="12" cy="7" r="1.5" /></svg>Higher Self</button>
       </nav>
     </div>
   );

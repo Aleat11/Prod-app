@@ -50,6 +50,55 @@ export const wellnessCheckins = sqliteTable("wellness_checkins", {
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
 
+export const journalEntries = sqliteTable("journal_entries", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  dateKey: text("date_key").notNull().unique(),
+  prompt: text("prompt").notNull().default(""),
+  body: text("body").notNull().default(""),
+  framework: text("framework").notNull().default("daily"),
+  emotionsJson: text("emotions_json").notNull().default("[]"),
+  themesJson: text("themes_json").notNull().default("[]"),
+  insight: text("insight").notNull().default(""),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+// Mindsera-style journal studio (migration 0018): the "Go Deeper" reflection
+// conversation and the AI "Minds" comments hang off a day's journal entry,
+// and "Ask Your Journal" keeps its own thread across the whole journal.
+export const journalDeeperMessages = sqliteTable("journal_deeper_messages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  entryDateKey: text("entry_date_key").notNull(),
+  role: text("role").notNull(),
+  preset: text("preset").notNull().default(""),
+  content: text("content").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const journalMindComments = sqliteTable("journal_mind_comments", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  entryDateKey: text("entry_date_key").notNull(),
+  mind: text("mind").notNull(),
+  content: text("content").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("journal_mind_comments_entry_mind_unique").on(table.entryDateKey, table.mind),
+]);
+
+export const journalAskMessages = sqliteTable("journal_ask_messages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const journalPrefs = sqliteTable("journal_prefs", {
+  id: integer("id").primaryKey(),
+  reminderEnabled: integer("reminder_enabled", { mode: "boolean" }).notNull().default(true),
+  reminderTime: text("reminder_time").notNull().default("20:30"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
 export const nightlyChecks = sqliteTable("nightly_checks", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   dateKey: text("date_key").notNull().unique(),

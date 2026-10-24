@@ -30,6 +30,163 @@ const nightlyEntrySchema = z.object({
   somethingKind: z.string(),
   updatedAt: z.string(),
 });
+const journalEmotionSchema = z.object({
+  name: z.string(),
+  intensity: z.number().int().min(1).max(3),
+});
+const journalEntrySchema = z.object({
+  dateKey: z.string(),
+  prompt: z.string(),
+  body: z.string(),
+  framework: z.string(),
+  emotions: z.array(journalEmotionSchema),
+  themes: z.array(z.string()),
+  insight: z.string(),
+  updatedAt: z.string(),
+});
+const journalPrefsSchema = z.object({
+  reminderEnabled: z.boolean(),
+  reminderTime: z.string(),
+});
+
+// Rotating journaling prompts, one per day of the year. Short, concrete,
+// and tied to the day the user actually lived — training, the frog, recovery.
+const JOURNAL_PROMPTS: string[] = [
+  "What did your body actually do today, and what did it teach you?",
+  "Name the hardest rep of the day — in the gym or outside it. What got you through it?",
+  "What did you avoid today, and what was the avoidance protecting?",
+  "Write the evidence: one thing today that proves you follow through.",
+  "How did you sleep and eat, honestly? What did that do to your energy?",
+  "What would tomorrow look like if it went exactly right? Name the first move.",
+  "Where did you feel strong today — body, mind, or nerve?",
+  "What soreness, tightness, or pain showed up? What is it asking for?",
+  "Grade the dial, not the answer: what effort did you make today that nobody scored?",
+  "What is one thing you can remove tomorrow to make the day lighter?",
+  "Describe today's workout in three lines: what went well, what was hard, what changes next time.",
+  "What did you do for recovery today? What will you protect tomorrow?",
+  "Who showed you something today — in person or from a distance? What was it?",
+  "What were you afraid would happen today that did not happen?",
+  "Finish this: today I kept my word about ___.",
+  "What is the smallest next step on the thing you keep circling?",
+  "How did your energy move across the day? When were you at your best?",
+  "What did you eat today, and did it match the goal of building, not just getting by?",
+  "Name one frustration from today. What is the useful part of it?",
+  "What did your Higher Self do today that your old pattern would not have?",
+  "If today repeated for a year, where would you end up? Adjust one thing.",
+  "What question were you scared to ask today — a person, or yourself?",
+  "Write about your hands, your grip, your posture: what is your body carrying?",
+  "What went unfinished today, and is it worth carrying into tomorrow?",
+  "What did you learn about your limits today — and which limit moved?",
+  "Say it plainly: what do you want your body to be able to do at 50?",
+  "What moment today deserves to be remembered a year from now?",
+  "Where did discipline beat motivation today? Where did it not?",
+  "What is one kind thing your body did for you today?",
+  "Tomorrow's frog, tonight's words: write it, and why it matters.",
+  "What are you proud of this week that has nothing to do with results?",
+];
+
+function journalPromptFor(dateKey: string): string {
+  const start = Date.parse(`${dateKey.slice(0, 4)}-01-01T12:00:00Z`);
+  const dayIndex = Math.max(0, Math.floor((Date.parse(`${dateKey}T12:00:00Z`) - start) / 86400000));
+  return JOURNAL_PROMPTS[dayIndex % JOURNAL_PROMPTS.length] ?? JOURNAL_PROMPTS[0]!;
+}
+
+function journalStreakFor(rows: Array<{ dateKey: string }>, dateKey: string): number {
+  const byDate = new Set(rows.map((row) => row.dateKey));
+  let cursor = byDate.has(dateKey) ? dateKey : shiftDateKey(dateKey, -1);
+  let count = 0;
+  while (byDate.has(cursor)) { count += 1; cursor = shiftDateKey(cursor, -1); }
+  return count;
+}
+
+// --- Mindsera-style journal studio (added 2026-10-24) ---
+// Modeled on Mindsera's public three-step flow: (1) Write — a blank page or a
+// guided framework; (2) Go Deeper — an AI reflection conversation about the
+// entry, with preset lenses and a questions-only mode; (3) Invite the Minds —
+// AI "Minds" that comment on the entry from distinct angles. Emotion analysis
+// follows Plutchik's eight primary emotions, the model Mindsera's public
+// pages describe. Framework guides below are original text written for this
+// app, named after the framework families Mindsera lists publicly (CBT
+// cognitive journaling, gratitude, anxiety, stoic, decision-making,
+// problem-solving, first principles, Ikigai, morning/evening writing).
+
+const PLUTCHIK_EMOTIONS: ["joy", "trust", "fear", "surprise", "sadness", "disgust", "anger", "anticipation"] = ["joy", "trust", "fear", "surprise", "sadness", "disgust", "anger", "anticipation"];
+
+type JournalFramework = { key: string; name: string; tagline: string; guide: string; questions: string[] };
+
+const JOURNAL_FRAMEWORKS: JournalFramework[] = [
+  { key: "daily", name: "Daily prompt", tagline: "Today's rotating prompt", guide: "Answer today's prompt in plain words. Five honest minutes beat a polished page.", questions: [] },
+  { key: "free", name: "Free write", tagline: "Blank page, no structure", guide: "Write whatever is in your head, unedited. Nobody grades this — future you reads it.", questions: [] },
+  { key: "morning", name: "Morning pages", tagline: "Clear the head before the day", guide: "Three rules: write longhand-fast, do not stop, do not reread. Dump the mental inbox before it runs the day.", questions: ["What is looping in your head this morning?", "What does today actually need from you?", "What can wait, honestly?"] },
+  { key: "gratitude", name: "Gratitude", tagline: "Name what is already working", guide: "Be specific. Not 'family' — the exact moment, person, or thing, and why it landed.", questions: ["Three specific things from the last 24 hours you are grateful for.", "Who made your life easier recently, and did they hear it from you?", "What ordinary thing would you miss most if it vanished tomorrow?"] },
+  { key: "cbt", name: "CBT thought record", tagline: "Catch the thought, test it", guide: "The classic cognitive journaling loop: name the situation, catch the automatic thought, test the evidence, write the balanced version.", questions: ["Situation: what happened, in facts only?", "Automatic thought: what did your mind say, word for word?", "Evidence for and against that thought?", "Balanced thought: what is true that you can stand on?"] },
+  { key: "anxiety", name: "Anxiety & overthinking", tagline: "Get the loop out of your head", guide: "Worry shrinks when it is written down and sorted: what is real, what is imagined, what is in your control.", questions: ["What exactly are you worried will happen?", "How likely is it, honestly — and what is the evidence?", "What part of this is in your control? Name the smallest action.", "If it did happen, what would you actually do first?"] },
+  { key: "stoic", name: "Stoic reflection", tagline: "Dichotomy of control", guide: "Sort the day the Stoic way: what was yours to control, what was not, and what virtue the hard part was asking for.", questions: ["What happened today that was outside your control?", "What was fully in your control — and did you use it?", "Which virtue did today ask for: courage, temperance, justice, or wisdom?", "If you viewed today from ten years out, what would matter?"] },
+  { key: "decision", name: "Decision log", tagline: "Decide on paper, not in circles", guide: "A decision written down stops renting space in your head. Include the 10/10/10 test: how will this feel in 10 minutes, 10 months, 10 years?", questions: ["What is the decision, stated in one sentence?", "Your real options — including doing nothing.", "How does each option feel at 10 minutes, 10 months, 10 years?", "What would you advise a friend in this exact spot?"] },
+  { key: "problem", name: "Problem solving", tagline: "Define it before you fight it", guide: "Most problems stay heavy because they stay vague. Define it, list causes, widen options, pick the first move.", questions: ["What is the problem, in one sentence a stranger would understand?", "What is actually causing it — not the symptoms?", "Three possible moves, including one you are avoiding.", "The first move, small enough to do today:"] },
+  { key: "firstprinciples", name: "First principles", tagline: "Strip it to what is true", guide: "Break the belief or plan down to the facts you know are true, then rebuild without the inherited assumptions.", questions: ["What do you believe or assume here?", "What do you actually know is true, from direct evidence?", "Which assumptions were borrowed from other people?", "Rebuilt from the facts alone, what would you do?"] },
+  { key: "ikigai", name: "Ikigai check", tagline: "Where the four circles meet", guide: "A periodic check on the overlap: what you love, what you are good at, what the world needs, what you can be paid for.", questions: ["What did you do recently that you loved doing?", "What are you demonstrably good at — where is the proof?", "What need around you keeps showing up?", "What of this could someone actually pay for?"] },
+  { key: "evening", name: "Evening review", tagline: "Close the day on purpose", guide: "Two minutes before the day ends: what happened, what it taught you, what tomorrow's first move is.", questions: ["What actually happened today — the short version?", "What did today teach you?", "What is tomorrow's first move?"] },
+];
+
+function journalFrameworkByKey(key: string): JournalFramework {
+  return JOURNAL_FRAMEWORKS.find((framework) => framework.key === key) ?? JOURNAL_FRAMEWORKS[0]!;
+}
+
+const DEEPER_PRESETS: Record<string, { name: string; instruction: string }> = {
+  companion: { name: "Companion", instruction: "You are a thoughtful journaling companion. Reflect back what he wrote in your own words, notice what carries weight, and ask one tailored follow-up question at a time that helps him dig deeper. Warm, plain, curious. More questions than answers — this is reflection, not advice." },
+  psychologist: { name: "Psychologist", instruction: "You reflect like a skilled psychologist: patterns, feelings under feelings, needs under reactions. You never diagnose, never label him with a condition, and never act as a therapist substitute. You offer gentle observations and ask the question that gets under the surface." },
+  cbt: { name: "CBT Coach", instruction: "You coach like a CBT practitioner: help him spot automatic thoughts and thinking traps (catastrophizing, mind reading, all-or-nothing, should statements), test them against evidence from his own writing, and land on a balanced, believable version. Concrete and kind." },
+  stoic: { name: "Stoic", instruction: "You reflect through Stoic principles: the dichotomy of control, view from above, memento mori, amor fati. Help him separate what is his to control from what is not, and find the virtue the situation is asking for. Plain spoken, no Latin flexing beyond the principle names." },
+};
+
+const JOURNAL_MINDS: Array<{ key: string; name: string; description: string; instruction: string }> = [
+  { key: "perspectives", name: "Alternative Perspectives", description: "The same entry, seen from angles you did not take.", instruction: "Offer two or three genuinely different ways to read the situation in his entry — including the most generous reading of anyone involved, and the reading his future self might take. Short, concrete, no flattery." },
+  { key: "traps", name: "Thinking Traps", description: "Cognitive distortions hiding in the writing.", instruction: "Scan his entry for thinking traps: catastrophizing, mind reading, all-or-nothing thinking, should statements, emotional reasoning, fortune telling, personalization. Quote the exact phrase for each trap you find and offer the balanced rewrite. If there are none, say what is thinking clearly in the entry instead." },
+  { key: "stoic", name: "Stoic Principles", description: "What the Stoics would point at here.", instruction: "Comment through Stoic principles: what here is in his control, what is not, what the obstacle is training, and how this looks from ten years out. Name the principle you are using. Two to four sentences." },
+  { key: "memories", name: "Past Memories", description: "Echoes from your own earlier entries.", instruction: "Connect today's entry to his earlier journal entries provided below: name the recurring theme, quote or paraphrase the earlier moment, and say what has changed or what has not. If no earlier entries are provided, say plainly that the pattern file starts today and name what to watch for as entries build up." },
+];
+
+const JOURNAL_VOICE = `You are the reflection companion inside Antwane's journal in his own app. He is a 43-year-old execution strategist who trains with dumbbells and a pull-up bar, runs two businesses, and journals to think clearly — not to be comforted. Write in his register: plain, direct, warm but not soft, no corporate wellness language, no toxic positivity, no diagnosing. Short paragraphs. You are a self-reflection tool, not a therapist or a substitute for professional care.`;
+
+function parseEmotionsJson(json: string): Array<{ name: string; intensity: number }> {
+  try {
+    const value: unknown = JSON.parse(json);
+    if (!Array.isArray(value)) return [];
+    return value.filter((item): item is { name: string; intensity: number } => item != null && typeof item === "object" && "name" in item && "intensity" in item && typeof (item as { name: unknown }).name === "string" && typeof (item as { intensity: unknown }).intensity === "number")
+      .map((item) => ({ name: item.name, intensity: Math.max(1, Math.min(3, Math.round(item.intensity))) }));
+  } catch { return []; }
+}
+
+function parseStringArrayJson(json: string): string[] {
+  try {
+    const value: unknown = JSON.parse(json);
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  } catch { return []; }
+}
+
+function weekKeyFor(dateKey: string): string {
+  const date = new Date(`${dateKey}T12:00:00Z`);
+  const mondayOffset = (date.getUTCDay() + 6) % 7;
+  return shiftDateKey(dateKey, -mondayOffset);
+}
+
+async function journalCorpus(ctx: Ctx, limit: number): Promise<string> {
+  const db = ctx.db<typeof schema>();
+  const [journalRows, nightlyRows, wellnessRows] = await Promise.all([
+    db.select().from(schema.journalEntries).orderBy(desc(schema.journalEntries.dateKey)).limit(limit),
+    db.select().from(schema.nightlyChecks).orderBy(desc(schema.nightlyChecks.dateKey)).limit(30),
+    db.select().from(schema.wellnessCheckins).orderBy(desc(schema.wellnessCheckins.dateKey)).limit(30),
+  ]);
+  const lines: string[] = [];
+  for (const row of journalRows) lines.push(`[Journal ${row.dateKey}${row.framework && row.framework !== "daily" && row.framework !== "free" ? ` · ${journalFrameworkByKey(row.framework).name}` : ""}] ${row.prompt ? `Prompt: ${row.prompt} — ` : ""}${row.body.slice(0, 900)}`);
+  for (const row of nightlyRows) {
+    const parts = [row.somethingGood && `good: ${row.somethingGood}`, row.somethingHard && `hard: ${row.somethingHard}`, row.somethingKind && `kind: ${row.somethingKind}`].filter(Boolean).join("; ");
+    if (parts) lines.push(`[Nightly ${row.dateKey}] ${parts}`);
+  }
+  for (const row of wellnessRows) lines.push(`[Check-in ${row.dateKey}] mood ${row.mood}/5, energy ${row.energy}/5, sleep ${row.sleepHours}h, stress ${row.stress}/5${row.journal ? `, note: ${row.journal}` : ""}`);
+  return lines.join("\n");
+}
 const zephyrResultInputSchema = z.object({
   testId: z.string().min(1),
   testTitle: z.string().min(1),
@@ -598,12 +755,13 @@ async function hsAddProof(ctx: Ctx, kind: string, text: string) {
 
 async function hsContext(ctx: Ctx, day: string): Promise<string> {
   const db = ctx.db<typeof schema>();
-  const [profile, facts, focusRows, wellnessRows, nightlyRows] = await Promise.all([
+  const [profile, facts, focusRows, wellnessRows, nightlyRows, journalRows] = await Promise.all([
     loadHsProfile(ctx),
     loadHsFacts(ctx),
     db.select().from(schema.dailyFocus).where(eq(schema.dailyFocus.dateKey, day)).limit(1),
     db.select().from(schema.wellnessCheckins).orderBy(desc(schema.wellnessCheckins.dateKey)).limit(7),
     db.select().from(schema.nightlyChecks).orderBy(desc(schema.nightlyChecks.dateKey)).limit(3),
+    db.select().from(schema.journalEntries).orderBy(desc(schema.journalEntries.dateKey)).limit(3),
   ]);
   const lines: string[] = [];
   if (profile && (profile.identityStatement || profile.valuesList || profile.nonNegotiables || profile.neverDoes || profile.pattern)) {
@@ -630,6 +788,10 @@ async function hsContext(ctx: Ctx, day: string): Promise<string> {
   if (nightlyRows.length > 0) {
     lines.push("Recent nightly checks:");
     for (const n of nightlyRows) lines.push(`- ${n.dateKey}: good: ${n.somethingGood || "-"} | hard: ${n.somethingHard || "-"} | kind: ${n.somethingKind || "-"}`);
+  }
+  if (journalRows.length > 0) {
+    lines.push("Recent journal entries (he wrote these himself):");
+    for (const j of journalRows) lines.push(`- ${j.dateKey}${j.prompt ? ` (prompt: ${j.prompt})` : ""}: ${j.body.slice(0, 600)}`);
   }
   return lines.join("\n");
 }
@@ -912,7 +1074,16 @@ export const Actions = {
       rituals: z.object({ today: ritualDaySchema, streaks: z.object({ sunlight: z.number(), meditation: z.number(), visualization: z.number(), chewingGum: z.number(), oneFootStand: z.number() }), history: z.array(ritualDaySchema) }),
       wellness: z.object({ today: wellnessEntrySchema.nullable(), history: z.array(wellnessEntrySchema) }),
       nightly: z.object({ today: nightlyEntrySchema.nullable(), history: z.array(nightlyEntrySchema) }),
-      zephyrResults: z.array(zephyrResultSchema),
+      journal: z.object({
+        today: journalEntrySchema.nullable(),
+        history: z.array(journalEntrySchema),
+        promptToday: z.string(),
+        streak: z.number(),
+        totalEntries: z.number(),
+        prefs: journalPrefsSchema,
+        frameworks: z.array(z.object({ key: z.string(), name: z.string(), tagline: z.string(), guide: z.string(), questions: z.array(z.string()) })),
+        weekRecap: z.string().nullable(),
+      }),
     }),
     async handler(ctx, args) {
       const db = ctx.db<typeof schema>();
@@ -928,8 +1099,22 @@ export const Actions = {
       const nightlyRows = await db.select().from(schema.nightlyChecks).orderBy(desc(schema.nightlyChecks.dateKey)).limit(120);
       const nightlyHistory = nightlyRows.map((row) => ({ dateKey: row.dateKey, somethingGood: row.somethingGood, somethingHard: row.somethingHard, somethingKind: row.somethingKind, updatedAt: row.updatedAt.toISOString() }));
       const todayNightly = nightlyHistory.find((row) => row.dateKey === args.dateKey) ?? null;
-      const zephyrRows = await db.select().from(schema.zephyrResults).orderBy(desc(schema.zephyrResults.takenAt), desc(schema.zephyrResults.id)).limit(500);
-      const zephyrResults = zephyrRows.map((row) => ({ id: row.id, testId: row.testId, testTitle: row.testTitle, category: row.category, score: row.score, maxScore: row.maxScore, bandLabel: row.bandLabel, bandSummary: row.bandSummary, takenAt: row.takenAt }));
+      // Test results (zephyr_results) stay stored in the app's memory and
+      // remain reachable through getZephyrResults, but are no longer part of
+      // the everyday app state or shown in the Journal UI (user's request).
+      const journalRows = await db.select().from(schema.journalEntries).orderBy(desc(schema.journalEntries.dateKey)).limit(120);
+      const journalHistory = journalRows.map((row) => ({ dateKey: row.dateKey, prompt: row.prompt, body: row.body, framework: row.framework, emotions: parseEmotionsJson(row.emotionsJson), themes: parseStringArrayJson(row.themesJson), insight: row.insight, updatedAt: row.updatedAt.toISOString() }));
+      const journalToday = journalHistory.find((row) => row.dateKey === args.dateKey) ?? null;
+      const journalRecapRaw = await hsGetMeta(ctx, `journal_recap_${weekKeyFor(args.dateKey)}`);
+      let journalWeekRecap: string | null = null;
+      if (journalRecapRaw) {
+        try {
+          const parsed: unknown = JSON.parse(journalRecapRaw);
+          if (parsed != null && typeof parsed === "object" && "summary" in parsed && typeof (parsed as { summary: unknown }).summary === "string") journalWeekRecap = (parsed as { summary: string }).summary;
+        } catch { journalWeekRecap = null; }
+      }
+      const journalPrefRows = await db.select().from(schema.journalPrefs).where(eq(schema.journalPrefs.id, 1)).limit(1);
+      const journalPrefs = journalPrefRows[0] ? { reminderEnabled: journalPrefRows[0].reminderEnabled, reminderTime: journalPrefRows[0].reminderTime } : { reminderEnabled: true, reminderTime: "20:30" };
       const todayRow = ritualRows.find((row) => row.dateKey === args.dateKey);
       const today = todayRow ? { dateKey: todayRow.dateKey, sunlight: todayRow.sunlight, meditation: todayRow.meditation, visualization: todayRow.visualization, chewingGum: todayRow.chewingGum, oneFootStand: todayRow.oneFootStand } : { dateKey: args.dateKey, sunlight: false, meditation: false, visualization: false, chewingGum: false, oneFootStand: false };
       const ritualHistory = ritualRows.map((row) => ({ dateKey: row.dateKey, sunlight: row.sunlight, meditation: row.meditation, visualization: row.visualization, chewingGum: row.chewingGum, oneFootStand: row.oneFootStand }));
@@ -977,7 +1162,16 @@ export const Actions = {
         rituals: { today, streaks: { sunlight: ritualStreak(ritualHistory, args.dateKey, "sunlight"), meditation: ritualStreak(ritualHistory, args.dateKey, "meditation"), visualization: ritualStreak(ritualHistory, args.dateKey, "visualization"), chewingGum: ritualStreak(ritualHistory, args.dateKey, "chewingGum"), oneFootStand: ritualStreak(ritualHistory, args.dateKey, "oneFootStand") }, history: ritualHistory },
         wellness: { today: todayWellness, history: wellnessHistory },
         nightly: { today: todayNightly, history: nightlyHistory },
-        zephyrResults,
+        journal: {
+          today: journalToday,
+          history: journalHistory,
+          promptToday: journalPromptFor(args.dateKey),
+          streak: journalStreakFor(journalRows, args.dateKey),
+          totalEntries: journalRows.length,
+          prefs: journalPrefs,
+          frameworks: JOURNAL_FRAMEWORKS,
+          weekRecap: journalWeekRecap,
+        },
       };
     },
   }),
@@ -1060,6 +1254,193 @@ export const Actions = {
       await db.insert(schema.nightlyChecks).values({ dateKey: args.dateKey, ...values }).onConflictDoUpdate({ target: schema.nightlyChecks.dateKey, set: values });
       ctx.invalidateQueries();
       return { ok: true };
+    },
+  }),
+  saveJournalEntry: defineAction({
+    request: z.object({ dateKey: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), prompt: z.string().trim().max(300), body: z.string().trim().min(1).max(4000), framework: z.string().trim().max(40).default("daily") }),
+    response: z.object({ ok: z.literal(true) }),
+    async handler(ctx, args): Promise<{ ok: true }> {
+      const db = ctx.db<typeof schema>();
+      const now = new Date();
+      const framework = JOURNAL_FRAMEWORKS.some((item) => item.key === args.framework) ? args.framework : "daily";
+      // Editing the words invalidates the old AI read on them.
+      const values = { prompt: args.prompt, body: args.body, framework, emotionsJson: "[]", themesJson: "[]", insight: "", updatedAt: now };
+      await db.insert(schema.journalEntries).values({ dateKey: args.dateKey, createdAt: now, ...values }).onConflictDoUpdate({ target: schema.journalEntries.dateKey, set: values });
+      ctx.invalidateQueries();
+      return { ok: true };
+    },
+  }),
+  saveJournalPrefs: defineAction({
+    request: z.object({ reminderEnabled: z.boolean(), reminderTime: timeOfDaySchema }),
+    response: z.object({ ok: z.literal(true) }),
+    async handler(ctx, args): Promise<{ ok: true }> {
+      const db = ctx.db<typeof schema>();
+      const values = { reminderEnabled: args.reminderEnabled, reminderTime: args.reminderTime, updatedAt: new Date() };
+      await db.insert(schema.journalPrefs).values({ id: 1, ...values }).onConflictDoUpdate({ target: schema.journalPrefs.id, set: values });
+      ctx.invalidateQueries();
+      return { ok: true };
+    },
+  }),
+  analyzeJournalEntry: defineAction({
+    request: z.object({ dateKey: dateKeySchema }),
+    response: z.object({ emotions: z.array(journalEmotionSchema), themes: z.array(z.string()), insight: z.string(), crisis: z.boolean() }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const rows = await db.select().from(schema.journalEntries).where(eq(schema.journalEntries.dateKey, args.dateKey)).limit(1);
+      const entry = rows[0];
+      if (!entry) throw new Error("No journal entry for that day yet.");
+      if (hsIsCrisis(entry.body)) return { emotions: [], themes: [], insight: HS_CRISIS_RESPONSE, crisis: true };
+      const result = await ctx.inference.complete(
+        `${JOURNAL_VOICE}\n\nAnalyze this journal entry the way Mindsera-style emotion tracking works: read the emotions actually present in the writing using Plutchik's eight primary emotions only (joy, trust, fear, surprise, sadness, disgust, anger, anticipation). Score each emotion you find with intensity 1 (a trace), 2 (clearly present), or 3 (dominant). Include at most 4 emotions, only ones genuinely in the text. Also name up to 4 recurring themes as short plain phrases (e.g. "money pressure", "training consistency"), and write one insight sentence: the most useful honest observation this entry supports, grounded only in what he wrote.\n\nENTRY (${entry.dateKey}${entry.prompt ? `, prompt: ${entry.prompt}` : ""}):\n${entry.body}`,
+        { schema: z.object({ emotions: z.array(z.object({ name: z.enum(PLUTCHIK_EMOTIONS), intensity: z.number().int().min(1).max(3) })).max(4), themes: z.array(z.string()).max(4), insight: z.string() }) },
+      );
+      await db.update(schema.journalEntries).set({ emotionsJson: JSON.stringify(result.emotions), themesJson: JSON.stringify(result.themes), insight: result.insight, updatedAt: new Date() }).where(eq(schema.journalEntries.dateKey, args.dateKey));
+      ctx.invalidateQueries();
+      return { emotions: result.emotions, themes: result.themes, insight: result.insight, crisis: false };
+    },
+  }),
+  getJournalReflection: defineAction({
+    request: z.object({ dateKey: dateKeySchema }),
+    response: z.object({
+      deeper: z.array(z.object({ id: z.number(), role: z.string(), preset: z.string(), content: z.string(), createdAt: z.string() })),
+      minds: z.array(z.object({ mind: z.string(), content: z.string(), createdAt: z.string() })),
+      askMessages: z.array(z.object({ id: z.number(), role: z.string(), content: z.string(), createdAt: z.string() })),
+    }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const [deeperRows, mindRows, askRows] = await Promise.all([
+        db.select().from(schema.journalDeeperMessages).where(eq(schema.journalDeeperMessages.entryDateKey, args.dateKey)).orderBy(schema.journalDeeperMessages.id).limit(80),
+        db.select().from(schema.journalMindComments).where(eq(schema.journalMindComments.entryDateKey, args.dateKey)),
+        db.select().from(schema.journalAskMessages).orderBy(schema.journalAskMessages.id).limit(60),
+      ]);
+      return {
+        deeper: deeperRows.map((row) => ({ id: row.id, role: row.role, preset: row.preset, content: row.content, createdAt: row.createdAt.toISOString() })),
+        minds: JOURNAL_MINDS.filter((mind) => mindRows.some((row) => row.mind === mind.key)).map((mind) => { const row = mindRows.find((item) => item.mind === mind.key); return { mind: mind.key, content: row?.content ?? "", createdAt: row ? row.createdAt.toISOString() : "" }; }),
+        askMessages: askRows.map((row) => ({ id: row.id, role: row.role, content: row.content, createdAt: row.createdAt.toISOString() })),
+      };
+    },
+  }),
+  journalGoDeeper: defineAction({
+    request: z.object({ dateKey: dateKeySchema, preset: z.enum(["companion", "psychologist", "cbt", "stoic"]), mode: z.enum(["conversational", "questions"]), message: z.string().trim().min(1).max(2000) }),
+    response: z.object({ reply: z.string(), crisis: z.boolean() }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const entryRows = await db.select().from(schema.journalEntries).where(eq(schema.journalEntries.dateKey, args.dateKey)).limit(1);
+      const entry = entryRows[0];
+      if (!entry) throw new Error("Save today's journal entry first, then go deeper on it.");
+      await db.insert(schema.journalDeeperMessages).values({ entryDateKey: args.dateKey, role: "user", preset: args.preset, content: args.message, createdAt: new Date() });
+      if (hsIsCrisis(args.message) || hsIsCrisis(entry.body)) {
+        await db.insert(schema.journalDeeperMessages).values({ entryDateKey: args.dateKey, role: "assistant", preset: args.preset, content: HS_CRISIS_RESPONSE, createdAt: new Date() });
+        ctx.invalidateQueries();
+        return { reply: HS_CRISIS_RESPONSE, crisis: true };
+      }
+      const preset = DEEPER_PRESETS[args.preset] ?? DEEPER_PRESETS.companion!;
+      const history = await db.select().from(schema.journalDeeperMessages).where(eq(schema.journalDeeperMessages.entryDateKey, args.dateKey)).orderBy(desc(schema.journalDeeperMessages.id)).limit(13);
+      const transcript = history.reverse().map((row) => `${row.role === "user" ? "Antwane" : preset.name}: ${row.content}`).join("\n");
+      const modeLine = args.mode === "questions"
+        ? "MODE: Questions only. Reply with two or three sharp follow-up questions and nothing else — no advice, no conclusions, at most one short reflective line before them."
+        : "MODE: Conversational. Reflect back what he wrote, connect it to the entry, and end with one question that takes him deeper. Two to four short paragraphs at most.";
+      const corpus = await journalCorpus(ctx, 8);
+      const reply = (await ctx.inference.complete(
+        `${JOURNAL_VOICE}\n\nLENS: ${preset.instruction}\n\n${modeLine}\n\nTODAY'S JOURNAL ENTRY (${entry.dateKey}):\n${entry.body}\n\nHIS RECENT WRITING (for connections, newest first):\n${corpus}\n\nCONVERSATION SO FAR\n${transcript}\n\nReply as the ${preset.name} lens to his last message.`,
+        { schema: z.string() },
+      )).trim();
+      await db.insert(schema.journalDeeperMessages).values({ entryDateKey: args.dateKey, role: "assistant", preset: args.preset, content: reply, createdAt: new Date() });
+      ctx.invalidateQueries();
+      return { reply, crisis: false };
+    },
+  }),
+  inviteJournalMinds: defineAction({
+    request: z.object({ dateKey: dateKeySchema }),
+    response: z.object({ minds: z.array(z.object({ mind: z.string(), content: z.string() })), crisis: z.boolean() }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const entryRows = await db.select().from(schema.journalEntries).where(eq(schema.journalEntries.dateKey, args.dateKey)).limit(1);
+      const entry = entryRows[0];
+      if (!entry) throw new Error("Save today's journal entry first, then invite the Minds.");
+      if (hsIsCrisis(entry.body)) return { minds: [], crisis: true };
+      const pastRows = await db.select().from(schema.journalEntries).orderBy(desc(schema.journalEntries.dateKey)).limit(6);
+      const past = pastRows.filter((row) => row.dateKey !== args.dateKey).slice(0, 5);
+      const pastText = past.length > 0 ? past.map((row) => `[${row.dateKey}] ${row.body.slice(0, 500)}`).join("\n") : "No earlier entries exist yet.";
+      const result = await ctx.inference.complete(
+        `${JOURNAL_VOICE}\n\nFour Minds are commenting on today's journal entry. Write each Mind's comment in its own field, in its own voice, two to five sentences each, grounded only in the entry (and, for Past Memories, the earlier entries):\n${JOURNAL_MINDS.map((mind) => `- ${mind.name}: ${mind.instruction}`).join("\n")}\n\nTODAY'S ENTRY (${entry.dateKey}):\n${entry.body}\n\nEARLIER ENTRIES:\n${pastText}`,
+        { schema: z.object({ perspectives: z.string(), traps: z.string(), stoic: z.string(), memories: z.string() }) },
+      );
+      const comments: Array<{ mind: string; content: string }> = [
+        { mind: "perspectives", content: result.perspectives },
+        { mind: "traps", content: result.traps },
+        { mind: "stoic", content: result.stoic },
+        { mind: "memories", content: result.memories },
+      ];
+      const now = new Date();
+      for (const comment of comments) {
+        await db.insert(schema.journalMindComments).values({ entryDateKey: args.dateKey, mind: comment.mind, content: comment.content, createdAt: now })
+          .onConflictDoUpdate({ target: [schema.journalMindComments.entryDateKey, schema.journalMindComments.mind], set: { content: comment.content, createdAt: now } });
+      }
+      ctx.invalidateQueries();
+      return { minds: comments, crisis: false };
+    },
+  }),
+  askJournal: defineAction({
+    request: z.object({ message: z.string().trim().min(1).max(1000) }),
+    response: z.object({ reply: z.string(), crisis: z.boolean() }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      await db.insert(schema.journalAskMessages).values({ role: "user", content: args.message, createdAt: new Date() });
+      if (hsIsCrisis(args.message)) {
+        await db.insert(schema.journalAskMessages).values({ role: "assistant", content: HS_CRISIS_RESPONSE, createdAt: new Date() });
+        ctx.invalidateQueries();
+        return { reply: HS_CRISIS_RESPONSE, crisis: true };
+      }
+      const corpus = await journalCorpus(ctx, 90);
+      if (!corpus.trim()) {
+        const reply = "There is nothing in your journal to search yet. Write a few entries first — then ask me things like “When do I feel most anxious?” or “What keeps repeating?” and I will answer from your own words.";
+        await db.insert(schema.journalAskMessages).values({ role: "assistant", content: reply, createdAt: new Date() });
+        ctx.invalidateQueries();
+        return { reply, crisis: false };
+      }
+      const history = await db.select().from(schema.journalAskMessages).orderBy(desc(schema.journalAskMessages.id)).limit(9);
+      const transcript = history.reverse().map((row) => `${row.role === "user" ? "Antwane" : "Journal"}: ${row.content}`).join("\n");
+      const reply = (await ctx.inference.complete(
+        `${JOURNAL_VOICE}\n\nHe is asking a question about his own journal. Answer ONLY from the entries below — cite dates when you spot a pattern, quote his own words back when they prove the point, and say plainly when the journal does not hold enough to answer. Never invent entries, dates, or feelings he did not write.\n\nHIS JOURNAL (newest first):\n${corpus}\n\nCONVERSATION SO FAR\n${transcript}\n\nAnswer his last question from the journal.`,
+        { schema: z.string() },
+      )).trim();
+      await db.insert(schema.journalAskMessages).values({ role: "assistant", content: reply, createdAt: new Date() });
+      ctx.invalidateQueries();
+      return { reply, crisis: false };
+    },
+  }),
+  journalWeeklyRecap: defineAction({
+    request: z.object({ dateKey: dateKeySchema, force: z.boolean().default(false) }),
+    response: z.object({ summary: z.string(), entryCount: z.number(), streak: z.number() }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const weekKey = weekKeyFor(args.dateKey);
+      const allRows = await db.select().from(schema.journalEntries).orderBy(desc(schema.journalEntries.dateKey)).limit(120);
+      const weekRows = allRows.filter((row) => row.dateKey >= weekKey && row.dateKey <= args.dateKey);
+      const streak = journalStreakFor(allRows, args.dateKey);
+      if (!args.force) {
+        const cached = await hsGetMeta(ctx, `journal_recap_${weekKey}`);
+        if (cached) {
+          try {
+            const parsed: unknown = JSON.parse(cached);
+            if (parsed != null && typeof parsed === "object" && "summary" in parsed && typeof (parsed as { summary: unknown }).summary === "string") {
+              return { summary: (parsed as { summary: string }).summary, entryCount: weekRows.length, streak };
+            }
+          } catch { /* regenerate */ }
+        }
+      }
+      if (weekRows.length === 0) {
+        return { summary: "No journal entries yet this week. The recap writes itself once the week has words in it — today's entry is the fastest way to start it.", entryCount: 0, streak };
+      }
+      const corpus = weekRows.map((row) => `[${row.dateKey}] ${row.prompt ? `Prompt: ${row.prompt} — ` : ""}${row.body.slice(0, 800)}${row.insight ? `\nInsight noted: ${row.insight}` : ""}`).join("\n");
+      const summary = (await ctx.inference.complete(
+        `${JOURNAL_VOICE}\n\nWrite his week-in-review from this week's journal entries, the way a weekly recap should read: how many entries and the streak are already known (${weekRows.length} entries, ${streak}-day streak). Cover what the week was actually about, the mindset running through it, one pattern worth noticing, and one tailored suggestion for next week. Four to six short sentences, plain paragraphs, grounded only in the entries. No headings, no bullet lists.\n\nTHIS WEEK'S ENTRIES:\n${corpus}`,
+        { schema: z.string() },
+      )).trim();
+      await hsSetMeta(ctx, `journal_recap_${weekKey}`, JSON.stringify({ summary }));
+      ctx.invalidateQueries();
+      return { summary, entryCount: weekRows.length, streak };
     },
   }),
   saveAssessment: defineAction({
