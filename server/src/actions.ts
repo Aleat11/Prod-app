@@ -1,4 +1,5 @@
 import { defineAction, z, type ActionsModule, type Ctx } from "@hatch/space-sdk";
+import { GoogleGenAI } from "@google/genai";
 import { desc, eq } from "drizzle-orm";
 import * as schema from "./schema";
 
@@ -641,13 +642,14 @@ const HS_VOICE = `You are Antwane's Higher Self. Not a coach, not a generic AI t
 
 HIS LAW
 - Framework order, always: Regulate, then Subtract, then Align, then Execute. Spinning: Regulate (breath, walk, state reset). Overloaded: Subtract (what gets cut). Conflicted: Align (does this serve the goal). Clear: Execute (smallest concrete step, now).
+- Close the gap between knowing and doing. Turn inspiration into implementation, and potential into performance. Stop consuming and start creating; stop planning and start executing.
 - Outreach before systems. Nothing new gets built until the day's pipeline touch is done. Building systems, tools, and dashboards is his known avoidance pattern. Name it when you see it.
 - The 1pm tripwire: if the frog (the day's hardest task) is untouched by 1pm, that is avoidance. Name it plainly, no shame.
 - A miss is data, not a verdict. Never miss twice is the rule. Self-compassion re-entry, then the smallest next step.
 
 HOW YOU TALK
 - Open with the fact, not a feeling.
-- Terse, direct, short sentences. Warm under the directness. Dry humor is fine.
+- Terse, direct, short sentences, measured 0.92x cadence. Warm under the directness. Dry humor is fine.
 - Never use em dashes. Use commas, periods, or a plain hyphen.
 - No flattery, no "great question", no "as an AI", no lectures, no list of seven options when one action is the answer.
 - End with one concrete next action unless the task asks for a specific format.
@@ -2153,4 +2155,110 @@ Be specific to this combination, warm, and practical. Do not quote the book.`,
       return result;
     },
   }),
+  synthesizeSpeech: defineAction({
+    request: z.object({
+      text: z.string().trim().min(1).max(4000),
+      persona: z.string().max(80).optional(),
+    }),
+    response: z.object({
+      ok: z.boolean(),
+      audioBase64: z.string().nullable(),
+      mimeType: z.string().nullable(),
+      engine: z.enum(["elevenlabs-me2", "gemini-tts", "browser-me2"]),
+    }),
+    async handler(_ctx, args) {
+      const cleanText = args.text.replace(/\s+/g, " ").trim().slice(0, 2800);
+      const elevenKey = process.env.ELEVENLABS_API_KEY?.trim();
+      const elevenVoiceId = process.env.ELEVENLABS_VOICE_ID?.trim();
+      if (elevenKey && elevenVoiceId) {
+        try {
+          const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(elevenVoiceId)}`, {
+            method: "POST",
+            headers: {
+              "xi-api-key": elevenKey,
+              "Content-Type": "application/json",
+              Accept: "audio/mpeg",
+            },
+            body: JSON.stringify({
+              text: cleanText,
+              model_id: "eleven_multilingual_v2",
+              voice_settings: {
+                stability: 0.50,
+                similarity_boost: 0.75,
+                style: 0.0,
+                use_speaker_boost: true,
+                speed: 0.92,
+              },
+            }),
+          });
+          if (res.ok) {
+            const arrayBuf = await res.arrayBuffer();
+            const audioBase64 = Buffer.from(arrayBuf).toString("base64");
+            if (audioBase64) {
+              return { ok: true, audioBase64, mimeType: "audio/mpeg", engine: "elevenlabs-me2" as const };
+            }
+          }
+        } catch {
+          // Fall through to Gemini TTS
+        }
+      }
+
+      const geminiKey = process.env.GEMINI_API_KEY?.trim();
+      if (geminiKey) {
+        try {
+          const ai = new GoogleGenAI({
+            apiKey: geminiKey,
+            httpOptions: {
+              headers: {
+                "User-Agent": "aistudio-build",
+              },
+            },
+          });
+          const response = await ai.models.generateContent({
+            model: "gemini-3.8-flash-tts",
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  {
+                    text: cleanText,
+                    speechMetadata: {
+                      style: "Deep, warm, grounded African-American male baritone voice matching the Me2 'Be Extraordinary' recording: calm and deliberate 0.92x cadence (sp92), composed 50% stability (s50), 75% presence and warmth (sb75), authoritative yet unhurried, short intentional pauses between phrases.",
+                    },
+                  } as Record<string, unknown>,
+                ],
+              },
+            ],
+            config: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName: "Charon" },
+                },
+              },
+            },
+          });
+          const inline = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+          if (inline?.data) {
+            return {
+              ok: true,
+              audioBase64: inline.data,
+              mimeType: inline.mimeType || "audio/wav",
+              engine: "gemini-tts" as const,
+            };
+          }
+        } catch {
+          // Fall through to browser Me2 voice profile
+        }
+      }
+
+      return {
+        ok: true,
+        audioBase64: null,
+        mimeType: null,
+        engine: "browser-me2" as const,
+      };
+    },
+  }),
 } satisfies ActionsModule;
+

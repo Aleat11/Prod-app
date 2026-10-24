@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import { THEMES, DOMAIN_META, themeByName, ALL_NAMES, type Domain, type Theme } from "./strengthsThemes";
 import { ASSESSMENT_QUESTIONS, buildStage1, buildStage2, consistencyReport, hybridRanking, BEHAVIOR_DIMS, type AnswerValue, type BehaviorRatings, type PlayQuestion } from "./strengthsAssessment";
-import { SpeechProvider, SpeechBar, SpeakButton, useSpeech, themeSpeechText } from "./strengthsSpeech";
+import { SpeechProvider, SpeakButton, useSpeech, themeSpeechText } from "./strengthsSpeech";
 
 const DOMAINS: Domain[] = ["Executing", "Influencing", "Relationship Building", "Strategic Thinking"];
 
@@ -15,7 +15,6 @@ export function StrengthsView() {
   return (
     <SpeechProvider>
       <StrengthsInner />
-      <SpeechBar />
     </SpeechProvider>
   );
 }

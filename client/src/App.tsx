@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type ApiResponse } from "./api";
 import { DeciderSection, HigherSelfView } from "./HigherSelfView";
-import { JournalView } from "./JournalView";
+import { JournalFeed, JournalStudioView } from "./JournalView";
+import { SpeechBar, SpeechProvider, useSpeech } from "./strengthsSpeech";
 import pushUpImage from "./assets/push-up.jpg";
 import chairDipImage from "./assets/chair-dip.jpg";
 import pikePushUpImage from "./assets/pike-push-up.jpg";
@@ -229,6 +230,22 @@ function dateKeyFromInstant(value: string): string {
   return `${y}-${m}-${d}`;
 }
 
+function parseRestSeconds(restText: string): number {
+  const clean = restText.toLowerCase().trim();
+  const nums = (clean.match(/\d+(\.\d+)?/g) ?? []).map(Number).filter(Number.isFinite);
+  if (nums.length === 0) return 90;
+  const maxVal = Math.max(...nums);
+  if (clean.includes("min")) return Math.round(maxVal * 60);
+  return Math.max(15, Math.round(maxVal));
+}
+
+function formatCountdown(totalSeconds: number): string {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const m = Math.floor(safe / 60);
+  const s = safe % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 function CheckMark({ checked }: { checked: boolean }) {
   return <span aria-hidden="true" className={`checkmark ${checked ? "checked" : ""}`}>{checked ? "✓" : ""}</span>;
 }
@@ -272,7 +289,7 @@ function RitualsCard({ state, dateKey }: { state: AppState; dateKey: string }) {
   );
 }
 
-function QuickCapture({ state, focus, dateKey, onCheckin }: { state: AppState; focus: FocusState | undefined; dateKey: string; onCheckin: () => void }) {
+function QuickCapture({ focus, dateKey, onCheckin }: { focus: FocusState | undefined; dateKey: string; onCheckin: () => void }) {
   const queryClient = useQueryClient();
   const [text, setText] = useState("");
   const [result, setResult] = useState<{ tone: "ok" | "help" | "error"; message: string } | null>(null);
@@ -282,10 +299,6 @@ function QuickCapture({ state, focus, dateKey, onCheckin }: { state: AppState; f
       queryClient.invalidateQueries({ queryKey: ["focus-state", dateKey] }),
     ]);
   };
-  const ritualMutation = useMutation({
-    mutationFn: (input: { ritual: RitualKey; completed: boolean }) => api.setDailyRitual({ dateKey, ...input }),
-    onSuccess: refresh,
-  });
   const startMutation = useMutation({
     mutationFn: () => api.startFrog({ dateKey }),
     onSuccess: async () => { setResult({ tone: "ok", message: "Frog started. Stay on it." }); await refresh(); },
@@ -303,24 +316,22 @@ function QuickCapture({ state, focus, dateKey, onCheckin }: { state: AppState; f
     const entry = text.trim();
     if (entry && !captureMutation.isPending) captureMutation.mutate(entry);
   };
-  const quickRituals: Array<{ key: RitualKey; label: string }> = [
-    { key: "sunlight", label: "Sunlight" },
-    { key: "meditation", label: "Meditated" },
-    { key: "visualization", label: "Visualized" },
-    { key: "chewingGum", label: "Chewing gum" },
-    { key: "oneFootStand", label: "One-foot stand" },
-  ];
+
   return <section className="quick-capture" aria-labelledby="capture-heading">
-    <div className="capture-head"><div><p className="eyebrow">ONE TAP OR ONE LINE</p><h2 id="capture-heading">Capture it now</h2></div><button className="checkin-jump" type="button" onClick={onCheckin}>Check in</button></div>
-    <div className="capture-chips" aria-label="One-tap capture">
-      {quickRituals.map((item) => {
-        const complete = state.rituals.today[item.key];
-        return <button key={item.key} type="button" className={complete ? "captured" : ""} aria-pressed={complete} disabled={ritualMutation.isPending} onClick={() => ritualMutation.mutate({ ritual: item.key, completed: !complete })}><span aria-hidden="true">{complete ? "✓" : "+"}</span>{item.label}</button>;
-      })}
-      {focus?.plan.frog && !focus.plan.frogStartedAt && !focus.plan.frogCompleted && <button type="button" className="start-chip" onClick={() => startMutation.mutate()} disabled={startMutation.isPending}><span aria-hidden="true">▶</span>Start frog</button>}
+    <div className="capture-head">
+      <div>
+        <p className="eyebrow">ONE LINE · NATURAL LANGUAGE</p>
+        <h2 id="capture-heading">Capture it now</h2>
+      </div>
+      <div className="capture-head-actions">
+        {focus?.plan.frog && !focus.plan.frogStartedAt && !focus.plan.frogCompleted && (
+          <button type="button" className="checkin-jump start-frog-jump" onClick={() => startMutation.mutate()} disabled={startMutation.isPending}>▶ Start frog</button>
+        )}
+        <button className="checkin-jump" type="button" onClick={onCheckin}>Check in</button>
+      </div>
     </div>
     <form className="capture-form" onSubmit={submit}>
-      <label htmlFor="quick-capture-input">Natural-language capture</label>
+      <label htmlFor="quick-capture-input">Log wake time, check-in numbers, or park a side task in one line</label>
       <div><input id="quick-capture-input" value={text} onChange={(event) => setText(event.target.value)} maxLength={500} placeholder="woke 5:40 · park reply to James · slept 7h, energy 3…" /><button disabled={!text.trim() || captureMutation.isPending}>{captureMutation.isPending ? "Reading…" : "Capture"}</button></div>
     </form>
     {result && <p className={`capture-result ${result.tone}`} role="status">{result.message}</p>}
@@ -547,6 +558,7 @@ function WakeTracker({ focus, dateKey }: { focus: FocusState | undefined; dateKe
 
 function FocusView({ state, dateKey, onGoJournal }: { state: AppState; dateKey: string; onGoJournal: () => void }) {
   const queryClient = useQueryClient();
+  const sp = useSpeech();
   const focusQuery = useQuery({ queryKey: ["focus-state", dateKey], queryFn: () => api.getFocusState({ dateKey }) });
   const focus = focusQuery.data;
   const [frog, setFrog] = useState("");
@@ -568,8 +580,6 @@ function FocusView({ state, dateKey, onGoJournal }: { state: AppState; dateKey: 
     if (!focus) return;
     const incoming = { frog: focus.plan.frog, reason: focus.plan.frogReason, taskTwo: focus.plan.taskTwo, taskThree: focus.plan.taskThree };
     if (planSnapshot && incoming.frog === planSnapshot.frog && incoming.reason === planSnapshot.reason && incoming.taskTwo === planSnapshot.taskTwo && incoming.taskThree === planSnapshot.taskThree) return;
-    // Adopt outside changes (first load, quick capture) only when the form
-    // still shows the last synced plan — never overwrite unsaved typing.
     const formPristine = !planSnapshot || (frog === planSnapshot.frog && reason === planSnapshot.reason && taskTwo === planSnapshot.taskTwo && taskThree === planSnapshot.taskThree);
     if (!formPristine) return;
     setFrog(incoming.frog); setReason(incoming.reason); setTaskTwo(incoming.taskTwo); setTaskThree(incoming.taskThree);
@@ -655,6 +665,7 @@ function FocusView({ state, dateKey, onGoJournal }: { state: AppState; dateKey: 
     setNow(Date.now());
     setTimer(next);
     startFrog.mutate();
+    if (sp.enabled) sp.playVoiceClip("execute");
   };
   const toggleTimer = () => {
     if (timer.startedAt == null) {
@@ -709,6 +720,9 @@ function FocusView({ state, dateKey, onGoJournal }: { state: AppState; dateKey: 
     {journalReminderDue && <aside className="proactive-check journal-nudge" aria-label="Journal reminder"><div><strong>Journal reminder · {formatTime12h(state.journal.prefs.reminderTime)}</strong><span>Today's prompt is waiting: “{state.journal.promptToday}” Five minutes, plain words.</span></div><button onClick={onGoJournal}>Write it</button></aside>}
     {middayTripwire && focus && <div className="tripwire" role="status"><div><strong>Midday check: “{focus.plan.frog}” hasn’t started.</strong><span>{focus.parkingLot.length > 0 ? `${focus.parkingLot.length} side task${focus.parkingLot.length === 1 ? "" : "s"} already parked (${focus.parkingLot.slice(0, 2).map((item) => item.text).join(", ")}${focus.parkingLot.length > 2 ? "…" : ""}) and the frog still hasn’t moved. Start it before another side task wins.` : "The frog you locked this morning is still untouched. Start it before another side task wins."}</span></div><button onClick={() => startFrog.mutate()} disabled={startFrog.isPending} aria-label={`Start ${focus.plan.frog}`}>Start now</button></div>}
 
+    {/* SECTION 1: FOCUS & EXECUTION */}
+    <div className="today-phase-divider"><span>01 · Focus &amp; execution</span></div>
+
     <section className={`frog-card ${focus?.plan.frogCompleted ? "complete" : ""}`} aria-labelledby="frog-heading">
       <div className="frog-label"><span>01</span><div><p className="eyebrow">THE FROG · NO SIDE TASKS FIRST</p><h2 id="frog-heading">{editingPlan ? (focus?.plan.frog ? "Edit today’s Big 3" : "Name what you’re avoiding") : (focus?.plan.frog || "Name what you’re avoiding")}</h2></div>{!editingPlan && focus?.plan.frog && <span className="lock-chip">{focus.plan.frogCompleted ? "Done" : focus.plan.frogStartedAt ? "Started" : "Locked"}</span>}</div>
       {focus?.plan.frogReason && !editingPlan && <p className="needle-reason">Moves the needle because: <b>{focus.plan.frogReason}</b></p>}
@@ -727,6 +741,7 @@ function FocusView({ state, dateKey, onGoJournal }: { state: AppState; dateKey: 
         <div className="frog-actions">
           <button className="frog-check" onClick={() => frogDone.mutate(!focus.plan.frogCompleted)} aria-pressed={focus.plan.frogCompleted}><CheckMark checked={focus.plan.frogCompleted} />{focus.plan.frogCompleted ? "Completed" : "Mark done"}</button>
           <button className="start-focus" onClick={() => beginBlock(focus.plan.frog)} disabled={timerActive || focus.plan.frogCompleted}>Start 90 min</button>
+          <button type="button" className="edit-plan" onClick={() => sp.playVoiceClip("execute")}>🔊 Voice cue</button>
           <button className="edit-plan" onClick={openPlanEditor}>Edit</button>
         </div>
         <ol className="big-three-list">
@@ -745,11 +760,7 @@ function FocusView({ state, dateKey, onGoJournal }: { state: AppState; dateKey: 
       {ratingOpen && <div className="rating-panel"><span>How focused were you?</span><div>{[1,2,3,4,5].map((value) => <button key={value} className={focusRating === value ? "selected" : ""} onClick={() => setFocusRating(value)} aria-label={`Focus rating ${value} out of 5`}>{value}</button>)}</div><button className="save-block" onClick={() => saveBlock.mutate()} disabled={saveBlock.isPending}>{saveBlock.isPending ? "Saving…" : "Save block"}</button></div>}
     </section>}
 
-    <QuickCapture state={state} focus={focus} dateKey={dateKey} onCheckin={jumpToCheckin} />
-
-    <WakeTracker focus={focus} dateKey={dateKey} />
-
-    <RitualsCard state={state} dateKey={dateKey} />
+    <QuickCapture focus={focus} dateKey={dateKey} onCheckin={jumpToCheckin} />
 
     <section className="parking-card" aria-labelledby="parking-heading">
       <div className="section-line"><div><p className="eyebrow">Clear your mind, keep focus</p><h2 id="parking-heading">Save for later</h2></div><span className="parking-count">{focus?.parkingLot.length ?? 0}</span></div>
@@ -760,10 +771,15 @@ function FocusView({ state, dateKey, onGoJournal }: { state: AppState; dateKey: 
       {focus?.parkingLot.length ? <div className="parking-list">{focus.parkingLot.map((item) => <div key={item.id}><span>{item.text}</span><button onClick={() => clearParking.mutate(item.id)} aria-label={`Clear ${item.text}`}>Clear</button></div>)}</div> : <p className="parking-empty">When a side task shows up, save it here and stay on the needle.</p>}
     </section>
 
-    <section className="focus-scoreboard">
-      <div><p className="eyebrow">LAST 7 DAYS</p><strong>{weekMinutes}</strong><span>needle minutes</span></div>
-      <div className="week-bars" aria-label={`${weekMinutes} focus minutes over the last seven days`}>{focus?.lastSevenDays.map((day) => <span key={day.dateKey} style={{ height: `${Math.max(6, Math.min(100, day.minutes / 90 * 100))}%` }} title={`${day.dateKey}: ${day.minutes} minutes`} />)}</div>
-    </section>
+    {/* SECTION 2: MORNING FOUNDATION */}
+    <div className="today-phase-divider"><span>02 · Morning &amp; daily rituals</span></div>
+
+    <WakeTracker focus={focus} dateKey={dateKey} />
+
+    <RitualsCard state={state} dateKey={dateKey} />
+
+    {/* SECTION 3: EVENING & ALIGNMENT */}
+    <div className="today-phase-divider"><span>03 · Evening &amp; review</span></div>
 
     <button type="button" className="accordion-row" aria-expanded={eveningOpen} onClick={() => setEveningOpen((value) => !value)}>
       <span><h3>Evening check-in</h3><p>{state.wellness.today || state.nightly?.today ? "Saved — tap to review or update" : "How today went, in thirty seconds"}</p></span>
@@ -781,13 +797,41 @@ function FocusView({ state, dateKey, onGoJournal }: { state: AppState; dateKey: 
     {deciderOpen && <div className="accordion-panel">
       <DeciderSection dateKey={dateKey} />
     </div>}
+
+    <section className="focus-scoreboard">
+      <div><p className="eyebrow">LAST 7 DAYS</p><strong>{weekMinutes}</strong><span>needle minutes</span></div>
+      <div className="week-bars" aria-label={`${weekMinutes} focus minutes over the last seven days`}>{focus?.lastSevenDays.map((day) => <span key={day.dateKey} style={{ height: `${Math.max(6, Math.min(100, day.minutes / 90 * 100))}%` }} title={`${day.dateKey}: ${day.minutes} minutes`} />)}</div>
+    </section>
   </main>;
 }
 
-function SetRow({ exerciseName, index, set, unit, weighted, onChange }: { exerciseName: string; index: number; set: DraftSet; unit: "reps" | "seconds"; weighted: boolean; onChange: (next: DraftSet) => void }) {
+function SetRow({
+  exerciseName,
+  index,
+  set,
+  unit,
+  weighted,
+  onChange,
+  onSetCompleted,
+}: {
+  exerciseName: string;
+  index: number;
+  set: DraftSet;
+  unit: "reps" | "seconds";
+  weighted: boolean;
+  onChange: (next: DraftSet) => void;
+  onSetCompleted?: () => void;
+}) {
+  const handleToggleCompleted = () => {
+    const nextCompleted = !set.completed;
+    onChange({ ...set, completed: nextCompleted, missed: set.completed ? set.missed : false });
+    if (nextCompleted && onSetCompleted) {
+      onSetCompleted();
+    }
+  };
   return (
     <div className={`set-row ${weighted ? "weighted" : "bodyweight"} ${set.completed ? "done" : ""} ${set.missed ? "missed" : ""}`}>
-      <button className="set-check" aria-label={`${set.completed ? "Uncheck" : "Complete"} set ${index + 1} of ${exerciseName}`} onClick={() => onChange({ ...set, completed: !set.completed, missed: set.completed ? set.missed : false })}>
+      <button className="set-check" aria-label={`${set.completed ? "Uncheck" : "Complete"} set ${index + 1} of ${exerciseName}`} onClick={handleToggleCompleted}>
         <CheckMark checked={set.completed} />
         <span>SET {index + 1}</span>
       </button>
@@ -942,6 +986,13 @@ function TargetsCard({ state }: { state: AppState }) {
   );
 }
 
+type RestTimerState = {
+  exerciseName: string;
+  targetSeconds: number;
+  elapsedSeconds: number;
+  startedAt: number | null;
+};
+
 function StrengthView({ state, dateKey }: { state: AppState; dateKey: string }) {
   const queryClient = useQueryClient();
   const sessionType: "session_a" | "session_b" = state.todaySessionType === "session_b" || state.nextSessionType === "session_b" ? "session_b" : "session_a";
@@ -953,6 +1004,9 @@ function StrengthView({ state, dateKey }: { state: AppState; dateKey: string }) 
   const [message, setMessage] = useState("");
   const [jumpInput, setJumpInput] = useState(state.smallestJump == null ? "" : String(state.smallestJump));
   const [jumpEditing, setJumpEditing] = useState(state.smallestJump == null);
+  const [expandedGuides, setExpandedGuides] = useState<Record<string, boolean>>({});
+  const [restTimer, setRestTimer] = useState<RestTimerState | null>(null);
+  const [restNow, setRestNow] = useState(Date.now());
 
   useEffect(() => {
     const stored = readStoredDraft(sessionType, program, state.upcoming);
@@ -966,6 +1020,48 @@ function StrengthView({ state, dateKey }: { state: AppState; dateKey: string }) 
     const stored: StoredSessionDraft = { requestId, sessionType, exercises: draft };
     localStorage.setItem(draftStorageKey(sessionType), JSON.stringify(stored));
   }, [draft, loadedSessionType, requestId, sessionType]);
+
+  useEffect(() => {
+    if (!restTimer || restTimer.startedAt == null) return;
+    const interval = window.setInterval(() => setRestNow(Date.now()), 500);
+    return () => window.clearInterval(interval);
+  }, [restTimer]);
+
+  const startRestFor = (exerciseName: string, restLabel: string) => {
+    const seconds = parseRestSeconds(restLabel);
+    setRestNow(Date.now());
+    setRestTimer({
+      exerciseName,
+      targetSeconds: seconds,
+      elapsedSeconds: 0,
+      startedAt: Date.now(),
+    });
+  };
+
+  const restElapsed = restTimer
+    ? restTimer.elapsedSeconds + (restTimer.startedAt == null ? 0 : Math.max(0, Math.floor((restNow - restTimer.startedAt) / 1000)))
+    : 0;
+  const restRemaining = restTimer ? Math.max(0, restTimer.targetSeconds - restElapsed) : 0;
+  const restFinished = Boolean(restTimer && restRemaining === 0);
+
+  const adjustRest = (deltaSeconds: number) => {
+    setRestTimer((current) => {
+      if (!current) return null;
+      return { ...current, targetSeconds: Math.max(15, current.targetSeconds + deltaSeconds) };
+    });
+  };
+
+  const togglePauseRest = () => {
+    setRestTimer((current) => {
+      if (!current) return null;
+      if (current.startedAt == null) {
+        setRestNow(Date.now());
+        return { ...current, startedAt: Date.now() };
+      }
+      const extra = Math.max(0, Math.floor((Date.now() - current.startedAt) / 1000));
+      return { ...current, elapsedSeconds: current.elapsedSeconds + extra, startedAt: null };
+    });
+  };
 
   const saveJump = useMutation({
     mutationFn: (jump: number) => api.saveSmallestJump({ smallestJump: jump }),
@@ -993,6 +1089,7 @@ function StrengthView({ state, dateKey }: { state: AppState; dateKey: string }) 
     }),
     onSuccess: async () => {
       localStorage.removeItem(draftStorageKey(sessionType));
+      setRestTimer(null);
       setMessage("Session saved. Your next workout is ready.");
       await queryClient.invalidateQueries({ queryKey: ["app-state", dateKey] });
     },
@@ -1056,28 +1153,82 @@ function StrengthView({ state, dateKey }: { state: AppState; dateKey: string }) 
           if (!entry) return null;
           const recommendation = state.upcoming?.recommendations.find((item) => item.name === exercise.name);
           const image = exerciseImages[exercise.name];
+          const allSetsDone = entry.sets.every((s) => s.completed || s.missed);
+          const guideOpen = expandedGuides[exercise.name] ?? false;
+
           return (
-            <article className={`exercise ${entry.pain ? "pain" : ""}`} key={exercise.name}>
+            <article className={`exercise ${entry.pain ? "pain" : ""} ${allSetsDone ? "exercise-complete" : ""}`} key={exercise.name}>
               <header>
                 <div>
                   <p className="exercise-meta">{exercise.sets} × {exercise.repMin}–{exercise.repMax}{exercise.unilateral ? " / side" : ""} · REST {exercise.rest}</p>
                   <h2>{exercise.name}</h2>
                 </div>
-                <button className="pain-button" aria-pressed={entry.pain} onClick={() => updateExercise(exerciseIndex, { ...entry, pain: !entry.pain })}>{entry.pain ? "PAIN FLAGGED" : "PAIN?"}</button>
+                <div className="exercise-header-actions">
+                  {allSetsDone && <span className="exercise-done-chip">Done ✓</span>}
+                  <button
+                    type="button"
+                    className={`guide-toggle-btn ${guideOpen ? "open" : ""}`}
+                    aria-expanded={guideOpen}
+                    onClick={() => setExpandedGuides((prev) => ({ ...prev, [exercise.name]: !guideOpen }))}
+                  >
+                    {guideOpen ? "Hide form" : "Form & tips"}
+                  </button>
+                  <button className="pain-button" aria-pressed={entry.pain} onClick={() => updateExercise(exerciseIndex, { ...entry, pain: !entry.pain })}>{entry.pain ? "PAIN FLAGGED" : "PAIN?"}</button>
+                </div>
               </header>
-              {image && <a className="exercise-image" href={image.source} target="_blank" rel="noreferrer" aria-label={`Open source for ${exercise.name} demonstration photo`}><img src={image.src} alt={image.alt} /><span>FORM DEMO</span></a>}
+
               <p className="cue">{exercise.cue}</p>
-              {exerciseTips[exercise.name] && <div className="exercise-tips"><span>Tips for your build · 6'0" · 153 lb · 43</span><ul>{exerciseTips[exercise.name]!.map((tip) => <li key={tip}>{tip}</li>)}</ul></div>}
-              {exercise.regressions && <p className="regression"><strong>Easier:</strong> {exercise.regressions}</p>}
+
+              {guideOpen && (
+                <div className="exercise-guide-drawer">
+                  {image && <a className="exercise-image" href={image.source} target="_blank" rel="noreferrer" aria-label={`Open source for ${exercise.name} demonstration photo`}><img src={image.src} alt={image.alt} /><span>FORM DEMO</span></a>}
+                  {exerciseTips[exercise.name] && <div className="exercise-tips"><span>Tips for your build · 6'0" · 153 lb · 43</span><ul>{exerciseTips[exercise.name]!.map((tip) => <li key={tip}>{tip}</li>)}</ul></div>}
+                  {exercise.regressions && <p className="regression"><strong>Easier:</strong> {exercise.regressions}</p>}
+                </div>
+              )}
+
               {recommendation && <p className={`recommendation ${recommendation.outcome}`}>{recommendation.notice}</p>}
               {entry.pain && <p className="pain-notice">Progression frozen. Rest this movement, and consider a doctor or physio if pain persists.</p>}
               <div className="sets">
-                {entry.sets.map((set, setIndex) => <SetRow key={setIndex} exerciseName={exercise.name} index={setIndex} set={set} unit={exercise.unit} weighted={exercise.weighted} onChange={(nextSet) => updateExercise(exerciseIndex, { ...entry, sets: entry.sets.map((item, index) => index === setIndex ? nextSet : item) })} />)}
+                {entry.sets.map((set, setIndex) => (
+                  <SetRow
+                    key={setIndex}
+                    exerciseName={exercise.name}
+                    index={setIndex}
+                    set={set}
+                    unit={exercise.unit}
+                    weighted={exercise.weighted}
+                    onChange={(nextSet) => updateExercise(exerciseIndex, { ...entry, sets: entry.sets.map((item, index) => index === setIndex ? nextSet : item) })}
+                    onSetCompleted={() => startRestFor(exercise.name, exercise.rest)}
+                  />
+                ))}
               </div>
             </article>
           );
         })}
       </div>
+
+      {restTimer && (
+        <aside className={`rest-timer-bar ${restFinished ? "ready" : ""}`} role="region" aria-label="Between-set rest timer">
+          <div className="rest-timer-main">
+            <div>
+              <span className="eyebrow">{restFinished ? "REST COMPLETE · NEXT SET" : `RESTING · ${restTimer.exerciseName}`}</span>
+              <strong>{restFinished ? "Ready — go when braced" : formatCountdown(restRemaining)}</strong>
+            </div>
+            <div className="rest-timer-controls">
+              <button type="button" onClick={() => adjustRest(-15)} aria-label="Subtract 15 seconds">−15s</button>
+              <button type="button" onClick={() => adjustRest(15)} aria-label="Add 15 seconds">+15s</button>
+              {!restFinished && (
+                <button type="button" onClick={togglePauseRest}>{restTimer.startedAt == null ? "Resume" : "Pause"}</button>
+              )}
+              <button type="button" className="rest-skip" onClick={() => setRestTimer(null)} aria-label="Dismiss rest timer">{restFinished ? "Done" : "Skip"}</button>
+            </div>
+          </div>
+          <div className="rest-timer-track">
+            <span style={{ width: `${Math.min(100, (restElapsed / Math.max(1, restTimer.targetSeconds)) * 100)}%` }} />
+          </div>
+        </aside>
+      )}
 
       <FlexibilityBlock state={state} dateKey={dateKey} />
 
@@ -1169,51 +1320,109 @@ function TodayView({ state, dateKey }: { state: AppState; dateKey: string }) {
   return <StrengthView state={state} dateKey={dateKey} />;
 }
 
+type LogFilter = "all" | "written" | "checkins" | "nightly" | "rituals" | "workouts";
+
 function HistoryView({ state, dateKey }: { state: AppState; dateKey: string }) {
+  const [mode, setMode] = useState<"studio" | "logbook">("studio");
+  const [filter, setFilter] = useState<LogFilter>("all");
+
+  const filterOptions: Array<{ key: LogFilter; label: string }> = [
+    { key: "all", label: "All" },
+    { key: "written", label: "Entries" },
+    { key: "checkins", label: "Check-ins" },
+    { key: "nightly", label: "Nightly" },
+    { key: "rituals", label: "Rituals" },
+    { key: "workouts", label: "Workouts" },
+  ];
+
   return (
-    <main className="page history-page">
-      <section className="page-heading"><p className="eyebrow">Your record</p><h1>Journal</h1><p>Write it down, go deeper, let the Minds read it back. Then read what the days add up to.</p></section>
-      <JournalView state={state} dateKey={dateKey} />
-      <section className="history-section">
-        <h2>Daily check-ins</h2>
-        {state.wellness.history.length === 0 ? <p className="empty">Your first check-in will land here.</p> : state.wellness.history.map((day) => (
-          <article className="wellness-history-row" key={day.dateKey}>
-            <div><time>{formatDate(`${day.dateKey}T12:00:00`)}</time>{day.journal && <p>{day.journal}</p>}</div>
-            <div className="wellness-history-metrics"><span><b>{day.mood}</b>Mood</span><span><b>{day.energy}</b>Energy</span><span><b>{day.sleepHours}</b>Sleep</span><span><b>{day.stress}</b>Stress</span></div>
-          </article>
-        ))}
-      </section>
-      <section className="history-section">
-        <h2>Nightly checks</h2>
-        {(!state.nightly?.history?.length) ? <p className="empty">Your first nightly check will land here.</p> : state.nightly.history.map((day) => (
-          <article className="nightly-history-row" key={day.dateKey}>
-            <time>{formatDate(`${day.dateKey}T12:00:00`)}</time>
-            <div className="nightly-history-entries">
-              {day.somethingGood && <p><span>Something good I did</span>{day.somethingGood}</p>}
-              {day.somethingHard && <p><span>Something hard I faced</span>{day.somethingHard}</p>}
-              {day.somethingKind && <p><span>Something kind</span>{day.somethingKind}</p>}
+    <>
+      <div className="train-switch" role="group" aria-label="Journal view">
+        <button className={mode === "studio" ? "active" : ""} onClick={() => setMode("studio")}>Write Studio</button>
+        <button className={mode === "logbook" ? "active" : ""} onClick={() => setMode("logbook")}>History Logbook</button>
+      </div>
+
+      <main className="page history-page">
+        <section className="page-heading">
+          <p className="eyebrow">{mode === "studio" ? "WRITE · SPEAK · REFLECT" : "YOUR RECORD"}</p>
+          <h1>{mode === "studio" ? "Journal" : "Logbook"}</h1>
+          <p>{mode === "studio" ? "Write or speak it down, go deeper with a lens, or let the Minds read it back." : "Every journal entry, check-in, nightly check, ritual day, and completed workout."}</p>
+        </section>
+
+        {mode === "studio" ? (
+          <JournalStudioView state={state} dateKey={dateKey} />
+        ) : (
+          <>
+            <div className="framework-chips logbook-filters" role="group" aria-label="Filter logbook records">
+              {filterOptions.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`framework-chip ${filter === item.key ? "active" : ""}`}
+                  aria-pressed={filter === item.key}
+                  onClick={() => setFilter(item.key)}
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
-          </article>
-        ))}
-      </section>
-      <section className="history-section">
-        <h2>Daily rituals</h2>
-        {state.rituals.history.length === 0 ? <p className="empty">Check off a ritual today to start your daily record.</p> : state.rituals.history.map((day) => (
-          <div className="ritual-history-row" key={day.dateKey}>
-            <time>{formatDate(`${day.dateKey}T12:00:00`)}</time>
-            <span className={day.sunlight ? "hit" : ""}>SUN</span><span className={day.meditation ? "hit" : ""}>MED</span><span className={day.visualization ? "hit" : ""}>VIS</span><span className={day.chewingGum ? "hit" : ""}>GUM</span><span className={day.oneFootStand ? "hit" : ""}>BAL</span>
-          </div>
-        ))}
-      </section>
-      <section className="history-section">
-        <h2>Workouts</h2>
-        {state.history.length === 0 ? <p className="empty">Your completed sessions will land here.</p> : state.history.map((session) => {
-          const setCount = session.exercises.flatMap((exercise) => exercise.sets).filter((set) => set.completed).length;
-          const painCount = session.exercises.filter((exercise) => exercise.pain).length;
-          return <article className="history-session" key={session.id}><div><p className="eyebrow">{formatDate(session.completedAt)}</p><h3>{formatSession(session.sessionType)}</h3></div><div className="history-stat"><b>{setCount}</b><span>SETS</span></div>{painCount > 0 && <span className="pain-chip">{painCount} pain flag{painCount === 1 ? "" : "s"}</span>}</article>;
-        })}
-      </section>
-    </main>
+
+            {(filter === "all" || filter === "written") && <JournalFeed state={state} />}
+
+            {(filter === "all" || filter === "checkins") && (
+              <section className="history-section">
+                <h2>Daily check-ins</h2>
+                {state.wellness.history.length === 0 ? <p className="empty">Your first check-in will land here.</p> : state.wellness.history.map((day) => (
+                  <article className="wellness-history-row" key={day.dateKey}>
+                    <div><time>{formatDate(`${day.dateKey}T12:00:00`)}</time>{day.journal && <p>{day.journal}</p>}</div>
+                    <div className="wellness-history-metrics"><span><b>{day.mood}</b>Mood</span><span><b>{day.energy}</b>Energy</span><span><b>{day.sleepHours}</b>Sleep</span><span><b>{day.stress}</b>Stress</span></div>
+                  </article>
+                ))}
+              </section>
+            )}
+
+            {(filter === "all" || filter === "nightly") && (
+              <section className="history-section">
+                <h2>Nightly checks</h2>
+                {(!state.nightly?.history?.length) ? <p className="empty">Your first nightly check will land here.</p> : state.nightly.history.map((day) => (
+                  <article className="nightly-history-row" key={day.dateKey}>
+                    <time>{formatDate(`${day.dateKey}T12:00:00`)}</time>
+                    <div className="nightly-history-entries">
+                      {day.somethingGood && <p><span>Something good I did</span>{day.somethingGood}</p>}
+                      {day.somethingHard && <p><span>Something hard I faced</span>{day.somethingHard}</p>}
+                      {day.somethingKind && <p><span>Something kind</span>{day.somethingKind}</p>}
+                    </div>
+                  </article>
+                ))}
+              </section>
+            )}
+
+            {(filter === "all" || filter === "rituals") && (
+              <section className="history-section">
+                <h2>Daily rituals</h2>
+                {state.rituals.history.length === 0 ? <p className="empty">Check off a ritual today to start your daily record.</p> : state.rituals.history.map((day) => (
+                  <div className="ritual-history-row" key={day.dateKey}>
+                    <time>{formatDate(`${day.dateKey}T12:00:00`)}</time>
+                    <span className={day.sunlight ? "hit" : ""}>SUN</span><span className={day.meditation ? "hit" : ""}>MED</span><span className={day.visualization ? "hit" : ""}>VIS</span><span className={day.chewingGum ? "hit" : ""}>GUM</span><span className={day.oneFootStand ? "hit" : ""}>BAL</span>
+                  </div>
+                ))}
+              </section>
+            )}
+
+            {(filter === "all" || filter === "workouts") && (
+              <section className="history-section">
+                <h2>Workouts</h2>
+                {state.history.length === 0 ? <p className="empty">Your completed sessions will land here.</p> : state.history.map((session) => {
+                  const setCount = session.exercises.flatMap((exercise) => exercise.sets).filter((set) => set.completed).length;
+                  const painCount = session.exercises.filter((exercise) => exercise.pain).length;
+                  return <article className="history-session" key={session.id}><div><p className="eyebrow">{formatDate(session.completedAt)}</p><h3>{formatSession(session.sessionType)}</h3></div><div className="history-stat"><b>{setCount}</b><span>SETS</span></div>{painCount > 0 && <span className="pain-chip">{painCount} pain flag{painCount === 1 ? "" : "s"}</span>}</article>;
+                })}
+              </section>
+            )}
+          </>
+        )}
+      </main>
+    </>
   );
 }
 
@@ -1342,19 +1551,22 @@ export function App() {
   if (stateQuery.error || !stateQuery.data) return <div className="error-state"><h1>Couldn’t load the log</h1><p>{String(stateQuery.error)}</p><button onClick={() => stateQuery.refetch()}>Try again</button></div>;
   const state = stateQuery.data;
   return (
-    <div className="app-shell">
-      {tab === "focus" && <FocusView state={state} dateKey={dateKey} onGoJournal={() => setTab("history")} />}
-      {tab === "train" && <TrainView state={state} dateKey={dateKey} />}
-      {tab === "history" && <HistoryView state={state} dateKey={dateKey} />}
-      {tab === "trends" && <TrendsView state={state} />}
-      {tab === "higher" && <HigherSelfView dateKey={dateKey} />}
-      <nav className="bottom-nav" aria-label="Primary navigation">
-        <button className={tab === "focus" ? "active" : ""} aria-current={tab === "focus" ? "page" : undefined} onClick={() => setTab("focus")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>Today</button>
-        <button className={tab === "train" ? "active" : ""} aria-current={tab === "train" ? "page" : undefined} onClick={() => setTab("train")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6.5 6.5v11" /><path d="M3.5 9v6" /><path d="M17.5 6.5v11" /><path d="M20.5 9v6" /><line x1="6.5" y1="12" x2="17.5" y2="12" /></svg>Training</button>
-        <button className={tab === "history" ? "active" : ""} aria-current={tab === "history" ? "page" : undefined} onClick={() => setTab("history")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>Journal</button>
-        <button className={tab === "trends" ? "active" : ""} aria-current={tab === "trends" ? "page" : undefined} onClick={() => setTab("trends")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>Insights</button>
-        <button className={tab === "higher" ? "active" : ""} aria-current={tab === "higher" ? "page" : undefined} onClick={() => setTab("higher")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 2a5 5 0 0 1 5 5c0 4-5 10-5 10S7 11 7 7a5 5 0 0 1 5-5z" /><circle cx="12" cy="7" r="1.5" /></svg>Higher Self</button>
-      </nav>
-    </div>
+    <SpeechProvider>
+      <div className="app-shell">
+        {tab === "focus" && <FocusView state={state} dateKey={dateKey} onGoJournal={() => setTab("history")} />}
+        {tab === "train" && <TrainView state={state} dateKey={dateKey} />}
+        {tab === "history" && <HistoryView state={state} dateKey={dateKey} />}
+        {tab === "trends" && <TrendsView state={state} />}
+        {tab === "higher" && <HigherSelfView dateKey={dateKey} />}
+        <SpeechBar />
+        <nav className="bottom-nav" aria-label="Primary navigation">
+          <button className={tab === "focus" ? "active" : ""} aria-current={tab === "focus" ? "page" : undefined} onClick={() => setTab("focus")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>Today</button>
+          <button className={tab === "train" ? "active" : ""} aria-current={tab === "train" ? "page" : undefined} onClick={() => setTab("train")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6.5 6.5v11" /><path d="M3.5 9v6" /><path d="M17.5 6.5v11" /><path d="M20.5 9v6" /><line x1="6.5" y1="12" x2="17.5" y2="12" /></svg>Training</button>
+          <button className={tab === "history" ? "active" : ""} aria-current={tab === "history" ? "page" : undefined} onClick={() => setTab("history")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>Journal</button>
+          <button className={tab === "trends" ? "active" : ""} aria-current={tab === "trends" ? "page" : undefined} onClick={() => setTab("trends")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>Insights</button>
+          <button className={tab === "higher" ? "active" : ""} aria-current={tab === "higher" ? "page" : undefined} onClick={() => setTab("higher")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 2a5 5 0 0 1 5 5c0 4-5 10-5 10S7 11 7 7a5 5 0 0 1 5-5z" /><circle cx="12" cy="7" r="1.5" /></svg>Higher Self</button>
+        </nav>
+      </div>
+    </SpeechProvider>
   );
 }

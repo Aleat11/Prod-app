@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type ApiResponse } from "./api";
+import { SpeakButton, VOICE_MANIFEST_CLIPS, VoiceDictateBar, useSpeech } from "./strengthsSpeech";
+import { StrengthsView } from "./StrengthsView";
 
 export type HsState = ApiResponse<typeof api, "getHigherSelfState">;
 export type Decision = HsState["decisions"][number];
@@ -35,10 +37,11 @@ export function useHsState(dateKey: string) {
 const CRISIS_TEXT = "If you are thinking about harming yourself, call or text 988 right now to reach the Suicide and Crisis Lifeline, free, 24/7, from anywhere in the US. If you might act on it, call 911. Everything else waits.";
 
 // ---------------------------------------------------------------------------
-// Decider (in the Focus tab)
+// Decider (in Focus tab and Higher Self tab)
 // ---------------------------------------------------------------------------
 
 export function DeciderSection({ dateKey }: { dateKey: string }) {
+  const sp = useSpeech();
   const queryClient = useQueryClient();
   const hsQuery = useHsState(dateKey);
   const state = hsQuery.data;
@@ -50,7 +53,20 @@ export function DeciderSection({ dateKey }: { dateKey: string }) {
 
   const createMut = useMutation({
     mutationFn: () => api.createDecision({ day: dateKey, dilemma: dilemma.trim(), options: options.map((o) => o.trim()).filter(Boolean), forcedPick: forcedPick.trim() ? forcedPick.trim() : undefined }),
-    onSuccess: (data) => { setActiveId(data.decision.id); setDilemma(""); setOptions(["", ""]); setForcedPick(""); void invalidate(); },
+    onSuccess: (data) => {
+      setActiveId(data.decision.id);
+      setDilemma("");
+      setOptions(["", ""]);
+      setForcedPick("");
+      void invalidate();
+      if (sp.voiceReply && data.decision.pick) {
+        sp.speak(
+          `decision-verdict-${data.decision.id}`,
+          "Higher Self verdict",
+          `The verdict: ${data.decision.pick}. ${data.decision.reasoning ?? ""} ${data.decision.firstStep ? `First step: ${data.decision.firstStep}` : ""}`,
+        );
+      }
+    },
   });
   const reopenMut = useMutation({ mutationFn: (id: number) => api.reopenDecision({ id }), onSuccess: () => void invalidate() });
   const deleteMut = useMutation({ mutationFn: (id: number) => api.deleteDecision({ id }), onSuccess: () => { setActiveId(null); void invalidate(); } });
@@ -91,6 +107,10 @@ export function DeciderSection({ dateKey }: { dateKey: string }) {
       ) : (
         <>
           <div className="hs-form">
+            <VoiceDictateBar
+              label="Speak the dilemma"
+              onAppend={(chunk) => setDilemma((prev) => (prev.trim() ? `${prev.trim()} ${chunk}` : chunk))}
+            />
             <label><span>The dilemma</span>
               <textarea value={dilemma} onChange={(e) => setDilemma(e.target.value)} rows={2} maxLength={400} placeholder="What is the call?" aria-label="The dilemma" />
             </label>
@@ -172,7 +192,14 @@ function DecisionDetail({ decision, dateKey, onBack, onReopen, onDelete }: { dec
 
       {decision.pick && stage === "verdict" && decision.status === "open" && (
         <div className="hs-verdict">
-          <p className="eyebrow">THE VERDICT</p>
+          <div className="section-line">
+            <p className="eyebrow">THE VERDICT</p>
+            <SpeakButton
+              id={`verdict-${decision.id}`}
+              label="Listen to Higher Self verdict"
+              text={`The verdict: ${decision.pick}. ${decision.reasoning ?? ""} ${decision.patternNote ? `Pattern check: ${decision.patternNote}` : ""} ${decision.firstStep ? `First step: ${decision.firstStep}` : ""}`}
+            />
+          </div>
           <strong>{decision.pick}</strong>
           {decision.reasoning && <p>{decision.reasoning}</p>}
           {decision.patternNote && <p><b>Pattern check:</b> {decision.patternNote}</p>}
@@ -235,12 +262,14 @@ function DecisionDetail({ decision, dateKey, onBack, onReopen, onDelete }: { dec
 }
 
 // ---------------------------------------------------------------------------
-// Higher Self tab
+// Higher Self tab (with Higher Self | Strengths switch & Live Voice)
 // ---------------------------------------------------------------------------
 
-type HsTool = "chat" | "identity" | "facts" | "reframe" | "proof" | "letter";
+type HsTool = "chat" | "decider" | "identity" | "facts" | "reframe" | "proof" | "letter";
 
 export function HigherSelfView({ dateKey }: { dateKey: string }) {
+  const [hubMode, setHubMode] = useState<"higher" | "strengths">("higher");
+  const sp = useSpeech();
   const queryClient = useQueryClient();
   const weekKey = weekKeyFor(dateKey);
   const hsQuery = useHsState(dateKey);
@@ -250,15 +279,35 @@ export function HigherSelfView({ dateKey }: { dateKey: string }) {
 
   // Morning message
   const morningQuery = useQuery({ queryKey: ["hs-morning", dateKey], queryFn: () => api.morningMessage({ day: dateKey, force: false }) });
-  const morningMut = useMutation({ mutationFn: () => api.morningMessage({ day: dateKey, force: true }), onSuccess: (data) => queryClient.setQueryData(["hs-morning", dateKey], data) });
+  const morningMut = useMutation({
+    mutationFn: () => api.morningMessage({ day: dateKey, force: true }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["hs-morning", dateKey], data);
+      if (sp.voiceReply && data.body) {
+        sp.speak(`hs-morning-${dateKey}`, data.title || "Morning message", `${data.title}. ${data.body} First move: ${data.action}`);
+      }
+    },
+  });
   const morning = morningMut.data ?? morningQuery.data ?? null;
 
   // Chat
   const [draft, setDraft] = useState("");
   const chatMut = useMutation({
     mutationFn: (message: string) => api.askHigherSelf({ day: dateKey, message }),
-    onSuccess: () => { setDraft(""); void invalidate(); },
+    onSuccess: (data) => {
+      setDraft("");
+      void invalidate();
+      if (sp.voiceReply && data.reply) {
+        sp.speak(`hs-chat-reply-${Date.now()}`, "Higher Self", data.reply);
+      }
+    },
   });
+
+  const sendChatMessage = (raw: string) => {
+    const clean = raw.trim();
+    if (!clean || chatMut.isPending) return;
+    chatMut.mutate(clean);
+  };
 
   // Identity
   const profile = state?.profile ?? null;
@@ -292,178 +341,304 @@ export function HigherSelfView({ dateKey }: { dateKey: string }) {
 
   // Reframe
   const [thought, setThought] = useState("");
-  const reframeMut = useMutation({ mutationFn: () => api.reframeThought({ day: dateKey, thought: thought.trim() }), onSuccess: () => { setThought(""); void invalidate(); } });
+  const reframeMut = useMutation({
+    mutationFn: (inputThought?: string) => api.reframeThought({ day: dateKey, thought: (inputThought ?? thought).trim() }),
+    onSuccess: (data) => {
+      setThought("");
+      void invalidate();
+      if (sp.voiceReply && data.answer) {
+        sp.speak(`hs-reframe-${Date.now()}`, "Higher Self reframe", data.answer);
+      }
+    },
+  });
 
   // Proof
   const [proofText, setProofText] = useState("");
   const [proofKind, setProofKind] = useState("manual");
   const addProofMut = useMutation({ mutationFn: () => api.addProofEntry({ kind: proofKind, text: proofText.trim() }), onSuccess: () => { setProofText(""); void invalidate(); } });
-  const showProofMut = useMutation({ mutationFn: () => api.showProof({ day: dateKey }) });
+  const showProofMut = useMutation({
+    mutationFn: () => api.showProof({ day: dateKey }),
+    onSuccess: (data) => {
+      if (sp.voiceReply && data.text) {
+        sp.speak(`hs-proof-${Date.now()}`, "Your proof record", data.text);
+      }
+    },
+  });
 
   // Sunday letter
-  const letterMut = useMutation({ mutationFn: (force: boolean) => api.sundayLetter({ day: dateKey, weekKey, force }), onSuccess: () => void invalidate() });
+  const letterMut = useMutation({
+    mutationFn: (force: boolean) => api.sundayLetter({ day: dateKey, weekKey, force }),
+    onSuccess: (data) => {
+      void invalidate();
+      if (sp.voiceReply && data.body) {
+        sp.speak(`hs-letter-${weekKey}`, "Sunday letter from your Higher Self", data.body);
+      }
+    },
+  });
   const letterBody = letterMut.data?.body ?? state?.letter?.body ?? null;
   const isSunday = new Date(`${dateKey}T12:00:00`).getDay() === 0;
 
   const tools: Array<{ key: HsTool; label: string }> = [
     { key: "chat", label: "Chat" },
-    { key: "identity", label: "Identity" },
-    { key: "facts", label: "Facts" },
+    { key: "decider", label: "Decider" },
     { key: "reframe", label: "Reframe" },
     { key: "proof", label: "Proof" },
+    { key: "identity", label: "Identity" },
+    { key: "facts", label: "Facts" },
     { key: "letter", label: "Letter" },
   ];
 
   return (
-    <main className="page hs-page">
-      <section className="page-heading">
-        <p className="eyebrow">THE VERSION OF YOU WHO ALREADY EXECUTES</p>
-        <h1>Higher Self</h1>
-        <p>Not a coach. The man who already did it, talking to the man who is drifting.</p>
-      </section>
-
-      <section className="hs-card" aria-labelledby="morning-heading">
-        <div className="section-line"><div><p className="eyebrow">THIS MORNING, FROM YOUR HIGHER SELF</p><h2 id="morning-heading">{morning ? morning.title : "Morning message"}</h2></div></div>
-        {morningQuery.isPending && !morning ? <p className="hs-empty">He is writing this morning's message…</p>
-          : morning ? <>
-            <p className="hs-body">{morning.body}</p>
-            <p className="hs-body"><b>First move:</b> {morning.action}</p>
-          </>
-          : <p className="hs-empty">No morning message yet.</p>}
-        {morningMut.isError && <p className="inline-error" role="alert">Could not write a fresh message yet.</p>}
-        <button type="button" className="hs-secondary" disabled={morningMut.isPending} onClick={() => morningMut.mutate()}>{morningMut.isPending ? "Writing…" : "Rewrite today's message"}</button>
-      </section>
-
-      {profile?.identityStatement && (
-        <section className="hs-card hs-identity-banner" aria-label="Your identity statement">
-          <p className="eyebrow">WHO I AM BECOMING</p>
-          <p className="hs-identity-text">{profile.identityStatement}</p>
-        </section>
-      )}
-
-      <div className="hs-tools" role="tablist" aria-label="Higher Self tools">
-        {tools.map((t) => (
-          <button key={t.key} type="button" role="tab" aria-selected={tool === t.key} className={tool === t.key ? "active" : ""} onClick={() => setTool(t.key)}>{t.label}</button>
-        ))}
+    <>
+      <div className="train-switch" role="group" aria-label="Higher Self mode">
+        <button className={hubMode === "higher" ? "active" : ""} onClick={() => setHubMode("higher")}>Higher Self</button>
+        <button className={hubMode === "strengths" ? "active" : ""} onClick={() => setHubMode("strengths")}>Strengths</button>
       </div>
 
-      {tool === "chat" && (
-        <section className="hs-card" aria-labelledby="hs-chat-heading">
-          <h2 id="hs-chat-heading" className="hs-sr">Ask your Higher Self</h2>
-          <div className="chat-thread" aria-live="polite" aria-label="Conversation with your Higher Self">
-            {(!state || state.chat.length === 0) && <div className="be-intro"><strong>say it straight.</strong><p>what is actually going on today? he answers from your identity, your facts, your Big 3, and your record.</p></div>}
-            {(state?.chat ?? []).map((m) => (
-              <article className={`chat-bubble ${m.role === "user" ? "user" : "assistant"}`} key={m.id}>
-                <span>{m.role === "user" ? "You" : "Higher Self"}</span><p>{m.content}</p>
-              </article>
-            ))}
-            {chatMut.isPending && <article className="chat-bubble assistant pending"><span>Higher Self</span><p>thinking…</p></article>}
-          </div>
-          {chatMut.isError && <p className="inline-error" role="alert">Your Higher Self could not answer right now. Your message is still here.</p>}
-          <div className="chat-compose">
-            <label htmlFor="hs-message">Message your Higher Self</label>
-            <textarea id="hs-message" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="say it straight…" rows={3} maxLength={2000} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); const c = draft.trim(); if (c && !chatMut.isPending) chatMut.mutate(c); } }} />
-            <button type="button" onClick={() => { const c = draft.trim(); if (c && !chatMut.isPending) chatMut.mutate(c); }} disabled={!draft.trim() || chatMut.isPending}>{chatMut.isPending ? "Sending…" : "Send"}</button>
-          </div>
-        </section>
-      )}
+      {hubMode === "strengths" ? (
+        <StrengthsView />
+      ) : (
+        <main className="page hs-page">
+          <section className="page-heading">
+            <p className="eyebrow">THE VERSION OF YOU WHO ALREADY EXECUTES</p>
+            <h1>Higher Self</h1>
+            <p>Not a coach. The man who already did it, talking to the man who is drifting — in your own Me2 voice.</p>
+          </section>
 
-      {tool === "identity" && (
-        <section className="hs-card" aria-labelledby="identity-heading">
-          <div className="section-line"><div><p className="eyebrow">IDENTITY · WHO YOU ARE BECOMING</p><h2 id="identity-heading">Identity</h2></div></div>
-          <div className="hs-form">
-            <label><span>Who my Higher Self is, in my words</span><textarea value={identity} onChange={(e) => setIdentity(e.target.value)} rows={3} maxLength={600} placeholder="The man I am becoming, written plainly." aria-label="Identity statement" /></label>
-            <label><span>My pattern (optional)</span><input value={pattern} onChange={(e) => setPattern(e.target.value)} maxLength={120} placeholder="e.g. Overthinker" aria-label="My pattern" /></label>
-            <label><span>My values, one per line</span><textarea value={values} onChange={(e) => setValues(e.target.value)} rows={3} maxLength={600} aria-label="My values" /></label>
-            <label><span>My non-negotiables</span><textarea value={nonNeg} onChange={(e) => setNonNeg(e.target.value)} rows={2} maxLength={600} aria-label="My non-negotiables" /></label>
-            <label><span>My Higher Self never…</span><textarea value={never} onChange={(e) => setNever(e.target.value)} rows={2} maxLength={600} aria-label="My Higher Self never" /></label>
-            {identityMut.isError && <p className="inline-error" role="alert">Could not save yet. Your words are still here.</p>}
-            <button type="button" className="save-checkin" disabled={identityMut.isPending} onClick={() => identityMut.mutate()}>{identityMut.isPending ? "Saving…" : identityMut.isSuccess ? "Saved ✓" : "Save identity"}</button>
-          </div>
-        </section>
-      )}
-
-      {tool === "facts" && (
-        <section className="hs-card" aria-labelledby="facts-heading">
-          <div className="section-line"><div><p className="eyebrow">WHAT YOUR HIGHER SELF KNOWS</p><h2 id="facts-heading">Facts about me</h2></div><span className="ritual-total">{state?.facts.length ?? 0}</span></div>
-          <p className="hs-dim">Facts you save here ground every answer, verdict, and letter. Nothing is pre-filled. Add only what is true.</p>
-          <form className="parking-entry" onSubmit={(e) => { e.preventDefault(); if (newFact.trim()) addFactMut.mutate(); }}>
-            <input value={newFact} onChange={(e) => setNewFact(e.target.value)} maxLength={280} placeholder="Add a fact he should never forget" aria-label="New fact" />
-            <button type="submit" disabled={!newFact.trim() || addFactMut.isPending}>Add</button>
-          </form>
-          {(!state || state.facts.length === 0) ? <p className="hs-empty">No facts yet. The first one you add starts his memory.</p>
-            : <div className="hs-fact-list">{state.facts.map((f) => (
-              <div className="hs-fact-row" key={f.id}>
-                {editingFactId === f.id ? <>
-                  <input value={editingFactText} onChange={(e) => setEditingFactText(e.target.value)} maxLength={280} aria-label="Edit fact" />
-                  <button type="button" onClick={() => updateFactMut.mutate()} disabled={!editingFactText.trim() || updateFactMut.isPending}>Save</button>
-                  <button type="button" onClick={() => setEditingFactId(null)}>Cancel</button>
-                </> : <>
-                  <span>{f.fact}</span>
-                  <button type="button" aria-label={`Edit fact: ${f.fact}`} onClick={() => { setEditingFactId(f.id); setEditingFactText(f.fact); }}>Edit</button>
-                  <button type="button" aria-label={`Delete fact: ${f.fact}`} onClick={() => deleteFactMut.mutate(f.id)}>Delete</button>
-                </>}
+          <section className="hs-card me2-voice-card" aria-labelledby="me2-voice-heading">
+            <div className="section-line">
+              <div>
+                <p className="eyebrow">ACTIVE VOICE PROFILE · ME2 (SP92 · S50 · SB75)</p>
+                <h2 id="me2-voice-heading">Be Extraordinary · Your Voice</h2>
               </div>
-            ))}</div>}
-        </section>
-      )}
+              <button
+                type="button"
+                className={`voice-toggle-chip ${sp.voiceReply ? "on" : ""}`}
+                aria-pressed={sp.voiceReply}
+                onClick={() => sp.setVoiceReply(!sp.voiceReply)}
+              >
+                {sp.voiceReply ? "🔊 Auto-speak replies: On" : "🔊 Auto-speak replies: Off"}
+              </button>
+            </div>
+            <p className="hs-dim">
+              “We close the gap between knowing and doing. We turn inspiration into implementation, and potential into performance.”
+            </p>
+            <div className="me2-clip-chips" role="group" aria-label="Play your recorded voice cues">
+              {VOICE_MANIFEST_CLIPS.map((clip) => {
+                const clipId = `me2-clip-${clip.key}`;
+                const active = sp.isActive(clipId);
+                const playing = active && sp.status === "speaking";
+                return (
+                  <button
+                    key={clip.key}
+                    type="button"
+                    className={`framework-chip ${active ? "active" : ""}`}
+                    aria-pressed={active}
+                    onClick={() => sp.playVoiceClip(clip.key)}
+                  >
+                    {playing ? `⏸ ${clip.shortLabel}` : `▶ ${clip.shortLabel}`}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
 
-      {tool === "reframe" && (
-        <section className="hs-card" aria-labelledby="reframe-heading">
-          <div className="section-line"><div><p className="eyebrow">REFRAME · LOWER SELF vs HIGHER SELF</p><h2 id="reframe-heading">Reframe a thought</h2></div></div>
-          <div className="hs-form">
-            <label><span>What did your lower self just say?</span><textarea value={thought} onChange={(e) => setThought(e.target.value)} rows={2} maxLength={500} placeholder="Say it the way it sounded in your head." aria-label="Thought to reframe" /></label>
-            {reframeMut.isError && <p className="inline-error" role="alert">Could not reframe that yet. Your thought is still here.</p>}
-            <button type="button" className="save-checkin" disabled={thought.trim().length < 3 || reframeMut.isPending} onClick={() => reframeMut.mutate()}>{reframeMut.isPending ? "Your Higher Self is answering…" : "Hear my Higher Self"}</button>
-          </div>
-          {(state?.reframes ?? []).length > 0 && <div className="hs-reframe-list">
-            {state!.reframes.map((r) => (
-              <div className="hs-reframe-pair" key={r.id}>
-                <div className="hs-reframe-thought"><span>Lower self</span><p>{r.thought}</p></div>
-                <div className="hs-reframe-answer"><span>Higher Self</span><p>{r.answer}</p></div>
+          <section className="hs-card" aria-labelledby="morning-heading">
+            <div className="section-line">
+              <div>
+                <p className="eyebrow">THIS MORNING, FROM YOUR HIGHER SELF</p>
+                <h2 id="morning-heading">{morning ? morning.title : "Morning message"}</h2>
               </div>
+              {morning && (
+                <SpeakButton
+                  id={`hs-morning-btn-${dateKey}`}
+                  label="Listen to morning message"
+                  text={`${morning.title}. ${morning.body} First move: ${morning.action}`}
+                />
+              )}
+            </div>
+            {morningQuery.isPending && !morning ? <p className="hs-empty">He is writing this morning's message…</p>
+              : morning ? <>
+                <p className="hs-body">{morning.body}</p>
+                <p className="hs-body"><b>First move:</b> {morning.action}</p>
+              </>
+              : <p className="hs-empty">No morning message yet.</p>}
+            {morningMut.isError && <p className="inline-error" role="alert">Could not write a fresh message yet.</p>}
+            <button type="button" className="hs-secondary" disabled={morningMut.isPending} onClick={() => morningMut.mutate()}>{morningMut.isPending ? "Writing…" : "Rewrite today's message"}</button>
+          </section>
+
+          {profile?.identityStatement && (
+            <section className="hs-card hs-identity-banner" aria-label="Your identity statement">
+              <div className="section-line">
+                <p className="eyebrow">WHO I AM BECOMING</p>
+                <SpeakButton variant="icon" id="hs-identity-read" label="Listen to identity statement" text={profile.identityStatement} />
+              </div>
+              <p className="hs-identity-text">{profile.identityStatement}</p>
+            </section>
+          )}
+
+          <div className="hs-tools" role="tablist" aria-label="Higher Self tools">
+            {tools.map((t) => (
+              <button key={t.key} type="button" role="tab" aria-selected={tool === t.key} className={tool === t.key ? "active" : ""} onClick={() => setTool(t.key)}>{t.label}</button>
             ))}
-          </div>}
-        </section>
-      )}
-
-      {tool === "proof" && (
-        <section className="hs-card" aria-labelledby="proof-heading">
-          <div className="section-line"><div><p className="eyebrow">PROOF LOG · EVIDENCE, NOT PROMISES</p><h2 id="proof-heading">Proof</h2></div><span className="ritual-total">{state?.proof.length ?? 0}</span></div>
-          <div className="hs-form">
-            <label><span>Kind</span>
-              <select value={proofKind} onChange={(e) => setProofKind(e.target.value)} aria-label="Proof kind">
-                <option value="manual">Win</option>
-                <option value="frog">Frog</option>
-                <option value="workout">Workout</option>
-                <option value="decision">Decision</option>
-                <option value="big3">Big 3</option>
-                <option value="checkin">Check-in</option>
-              </select>
-            </label>
-            <label><span>What happened?</span><textarea value={proofText} onChange={(e) => setProofText(e.target.value)} rows={2} maxLength={300} placeholder="One real win, stated as evidence." aria-label="Proof entry" /></label>
-            <button type="button" className="save-checkin" disabled={proofText.trim().length < 3 || addProofMut.isPending} onClick={() => addProofMut.mutate()}>{addProofMut.isPending ? "Saving…" : "Add proof"}</button>
           </div>
-          <button type="button" className="hs-secondary" disabled={showProofMut.isPending} onClick={() => showProofMut.mutate()}>{showProofMut.isPending ? "Reading your record…" : "Show me proof"}</button>
-          {showProofMut.data && <p className="hs-body hs-proof-readback">{showProofMut.data.text}</p>}
-          {(!state || state.proof.length === 0) ? <p className="hs-empty">No proof logged yet. Eat the frog, finish a workout, or lock a decision and log it here.</p>
-            : <div className="hs-proof-list">{state.proof.map((p) => (
-              <div className="hs-proof-row" key={p.id}><span className="hs-proof-kind">{p.kind}</span><span>{p.text}</span><time>{new Date(p.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time></div>
-            ))}</div>}
-        </section>
-      )}
 
-      {tool === "letter" && (
-        <section className="hs-card" aria-labelledby="letter-heading">
-          <div className="section-line"><div><p className="eyebrow">THE SUNDAY LETTER</p><h2 id="letter-heading">Sunday letter</h2></div></div>
-          {!isSunday && !letterBody && <p className="hs-dim">The letter is written on Sundays, from the week's record: decisions kept, proof added, who was driving. Come back Sunday, or generate this week's early below.</p>}
-          {letterBody ? <p className="hs-body hs-letter-body">{letterBody}</p> : <p className="hs-empty">No letter for this week yet.</p>}
-          {letterMut.isError && <p className="inline-error" role="alert">The letter did not write yet. Try again.</p>}
-          <button type="button" className="save-checkin" disabled={letterMut.isPending} onClick={() => letterMut.mutate(Boolean(letterBody))}>{letterMut.isPending ? "Writing…" : letterBody ? "Rewrite this week's letter" : "Generate this week's letter"}</button>
-        </section>
-      )}
+          {tool === "chat" && (
+            <section className="hs-card" aria-labelledby="hs-chat-heading">
+              <h2 id="hs-chat-heading" className="hs-sr">Ask your Higher Self</h2>
+              <div className="chat-thread" aria-live="polite" aria-label="Conversation with your Higher Self">
+                {(!state || state.chat.length === 0) && <div className="be-intro"><strong>say it straight.</strong><p>what is actually going on today? type or tap Live Voice below — he answers from your identity, your facts, your Big 3, and your record.</p></div>}
+                {(state?.chat ?? []).map((m) => (
+                  <article className={`chat-bubble ${m.role === "user" ? "user" : "assistant"}`} key={m.id}>
+                    <div className="chat-bubble-meta">
+                      <span>{m.role === "user" ? "You" : "Higher Self"}</span>
+                      {m.role !== "user" && <SpeakButton variant="icon" id={`hs-chat-${m.id}`} label="Listen to Higher Self reply" text={m.content} />}
+                    </div>
+                    <p>{m.content}</p>
+                  </article>
+                ))}
+                {chatMut.isPending && <article className="chat-bubble assistant pending"><span>Higher Self</span><p>thinking…</p></article>}
+              </div>
+              {chatMut.isError && <p className="inline-error" role="alert">Your Higher Self could not answer right now. Your message is still here.</p>}
+              <VoiceDictateBar
+                label="Talk to Higher Self"
+                onAppend={(chunk) => setDraft((prev) => (prev.trim() ? `${prev.trim()} ${chunk}` : chunk))}
+                onSendTurn={(spoken) => sendChatMessage(spoken)}
+                showVoiceReplyToggle
+                replyPersona="Higher Self"
+              />
+              <div className="chat-compose">
+                <label htmlFor="hs-message">Message your Higher Self</label>
+                <textarea id="hs-message" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="say it straight…" rows={3} maxLength={2000} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMessage(draft); } }} />
+                <button type="button" onClick={() => sendChatMessage(draft)} disabled={!draft.trim() || chatMut.isPending}>{chatMut.isPending ? "Sending…" : "Send"}</button>
+              </div>
+            </section>
+          )}
 
-      <p className="hs-crisis">{CRISIS_TEXT}</p>
-    </main>
+          {tool === "decider" && <DeciderSection dateKey={dateKey} />}
+
+          {tool === "identity" && (
+            <section className="hs-card" aria-labelledby="identity-heading">
+              <div className="section-line"><div><p className="eyebrow">IDENTITY · WHO YOU ARE BECOMING</p><h2 id="identity-heading">Identity</h2></div></div>
+              <div className="hs-form">
+                <label><span>Who my Higher Self is, in my words</span><textarea value={identity} onChange={(e) => setIdentity(e.target.value)} rows={3} maxLength={600} placeholder="The man I am becoming, written plainly." aria-label="Identity statement" /></label>
+                <label><span>My pattern (optional)</span><input value={pattern} onChange={(e) => setPattern(e.target.value)} maxLength={120} placeholder="e.g. Overthinker" aria-label="My pattern" /></label>
+                <label><span>My values, one per line</span><textarea value={values} onChange={(e) => setValues(e.target.value)} rows={3} maxLength={600} aria-label="My values" /></label>
+                <label><span>My non-negotiables</span><textarea value={nonNeg} onChange={(e) => setNonNeg(e.target.value)} rows={2} maxLength={600} aria-label="My non-negotiables" /></label>
+                <label><span>My Higher Self never…</span><textarea value={never} onChange={(e) => setNever(e.target.value)} rows={2} maxLength={600} aria-label="My Higher Self never" /></label>
+                {identityMut.isError && <p className="inline-error" role="alert">Could not save yet. Your words are still here.</p>}
+                <button type="button" className="save-checkin" disabled={identityMut.isPending} onClick={() => identityMut.mutate()}>{identityMut.isPending ? "Saving…" : identityMut.isSuccess ? "Saved ✓" : "Save identity"}</button>
+              </div>
+            </section>
+          )}
+
+          {tool === "facts" && (
+            <section className="hs-card" aria-labelledby="facts-heading">
+              <div className="section-line"><div><p className="eyebrow">WHAT YOUR HIGHER SELF KNOWS</p><h2 id="facts-heading">Facts about me</h2></div><span className="ritual-total">{state?.facts.length ?? 0}</span></div>
+              <p className="hs-dim">Facts you save here ground every answer, verdict, and letter. Nothing is pre-filled. Add only what is true.</p>
+              <form className="parking-entry" onSubmit={(e) => { e.preventDefault(); if (newFact.trim()) addFactMut.mutate(); }}>
+                <input value={newFact} onChange={(e) => setNewFact(e.target.value)} maxLength={280} placeholder="Add a fact he should never forget" aria-label="New fact" />
+                <button type="submit" disabled={!newFact.trim() || addFactMut.isPending}>Add</button>
+              </form>
+              {(!state || state.facts.length === 0) ? <p className="hs-empty">No facts yet. The first one you add starts his memory.</p>
+                : <div className="hs-fact-list">{state.facts.map((f) => (
+                  <div className="hs-fact-row" key={f.id}>
+                    {editingFactId === f.id ? <>
+                      <input value={editingFactText} onChange={(e) => setEditingFactText(e.target.value)} maxLength={280} aria-label="Edit fact" />
+                      <button type="button" onClick={() => updateFactMut.mutate()} disabled={!editingFactText.trim() || updateFactMut.isPending}>Save</button>
+                      <button type="button" onClick={() => setEditingFactId(null)}>Cancel</button>
+                    </> : <>
+                      <span>{f.fact}</span>
+                      <button type="button" aria-label={`Edit fact: ${f.fact}`} onClick={() => { setEditingFactId(f.id); setEditingFactText(f.fact); }}>Edit</button>
+                      <button type="button" aria-label={`Delete fact: ${f.fact}`} onClick={() => deleteFactMut.mutate(f.id)}>Delete</button>
+                    </>}
+                  </div>
+                ))}</div>}
+            </section>
+          )}
+
+          {tool === "reframe" && (
+            <section className="hs-card" aria-labelledby="reframe-heading">
+              <div className="section-line"><div><p className="eyebrow">REFRAME · LOWER SELF vs HIGHER SELF</p><h2 id="reframe-heading">Reframe a thought</h2></div></div>
+              <VoiceDictateBar
+                label="Speak the thought"
+                onAppend={(chunk) => setThought((prev) => (prev.trim() ? `${prev.trim()} ${chunk}` : chunk))}
+                onSendTurn={(spoken) => { if (spoken.trim().length >= 3 && !reframeMut.isPending) reframeMut.mutate(spoken.trim()); }}
+                showVoiceReplyToggle
+                replyPersona="Higher Self"
+              />
+              <div className="hs-form">
+                <label><span>What did your lower self just say?</span><textarea value={thought} onChange={(e) => setThought(e.target.value)} rows={2} maxLength={500} placeholder="Say it the way it sounded in your head." aria-label="Thought to reframe" /></label>
+                {reframeMut.isError && <p className="inline-error" role="alert">Could not reframe that yet. Your thought is still here.</p>}
+                <button type="button" className="save-checkin" disabled={thought.trim().length < 3 || reframeMut.isPending} onClick={() => reframeMut.mutate(thought)}>{reframeMut.isPending ? "Your Higher Self is answering…" : "Hear my Higher Self"}</button>
+              </div>
+              {(state?.reframes ?? []).length > 0 && <div className="hs-reframe-list">
+                {state!.reframes.map((r) => (
+                  <div className="hs-reframe-pair" key={r.id}>
+                    <div className="hs-reframe-thought"><span>Lower self</span><p>{r.thought}</p></div>
+                    <div className="hs-reframe-answer">
+                      <div className="section-line">
+                        <span>Higher Self</span>
+                        <SpeakButton variant="icon" id={`reframe-ans-${r.id}`} label="Listen to Higher Self reframe" text={r.answer} />
+                      </div>
+                      <p>{r.answer}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>}
+            </section>
+          )}
+
+          {tool === "proof" && (
+            <section className="hs-card" aria-labelledby="proof-heading">
+              <div className="section-line"><div><p className="eyebrow">PROOF LOG · EVIDENCE, NOT PROMISES</p><h2 id="proof-heading">Proof</h2></div><span className="ritual-total">{state?.proof.length ?? 0}</span></div>
+              <div className="hs-form">
+                <label><span>Kind</span>
+                  <select value={proofKind} onChange={(e) => setProofKind(e.target.value)} aria-label="Proof kind">
+                    <option value="manual">Win</option>
+                    <option value="frog">Frog</option>
+                    <option value="workout">Workout</option>
+                    <option value="decision">Decision</option>
+                    <option value="big3">Big 3</option>
+                    <option value="checkin">Check-in</option>
+                  </select>
+                </label>
+                <label><span>What happened?</span><textarea value={proofText} onChange={(e) => setProofText(e.target.value)} rows={2} maxLength={300} placeholder="One real win, stated as evidence." aria-label="Proof entry" /></label>
+                <button type="button" className="save-checkin" disabled={proofText.trim().length < 3 || addProofMut.isPending} onClick={() => addProofMut.mutate()}>{addProofMut.isPending ? "Saving…" : "Add proof"}</button>
+              </div>
+              <button type="button" className="hs-secondary" disabled={showProofMut.isPending} onClick={() => showProofMut.mutate()}>{showProofMut.isPending ? "Reading your record…" : "Show me proof"}</button>
+              {showProofMut.data && (
+                <div className="hs-proof-readback">
+                  <div className="section-line">
+                    <span className="eyebrow">FROM YOUR RECORD</span>
+                    <SpeakButton variant="icon" id={`proof-readback-${dateKey}`} label="Listen to your proof readback" text={showProofMut.data.text} />
+                  </div>
+                  <p className="hs-body">{showProofMut.data.text}</p>
+                </div>
+              )}
+              {(!state || state.proof.length === 0) ? <p className="hs-empty">No proof logged yet. Eat the frog, finish a workout, or lock a decision and log it here.</p>
+                : <div className="hs-proof-list">{state.proof.map((p) => (
+                  <div className="hs-proof-row" key={p.id}><span className="hs-proof-kind">{p.kind}</span><span>{p.text}</span><time>{new Date(p.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time></div>
+                ))}</div>}
+            </section>
+          )}
+
+          {tool === "letter" && (
+            <section className="hs-card" aria-labelledby="letter-heading">
+              <div className="section-line">
+                <div><p className="eyebrow">THE SUNDAY LETTER</p><h2 id="letter-heading">Sunday letter</h2></div>
+                {letterBody && <SpeakButton id={`sunday-letter-${weekKey}`} label="Listen to Sunday letter" text={letterBody} />}
+              </div>
+              {!isSunday && !letterBody && <p className="hs-dim">The letter is written on Sundays, from the week's record: decisions kept, proof added, who was driving. Come back Sunday, or generate this week's early below.</p>}
+              {letterBody ? <p className="hs-body hs-letter-body">{letterBody}</p> : <p className="hs-empty">No letter for this week yet.</p>}
+              {letterMut.isError && <p className="inline-error" role="alert">The letter did not write yet. Try again.</p>}
+              <button type="button" className="save-checkin" disabled={letterMut.isPending} onClick={() => letterMut.mutate(Boolean(letterBody))}>{letterMut.isPending ? "Writing…" : letterBody ? "Rewrite this week's letter" : "Generate this week's letter"}</button>
+            </section>
+          )}
+
+          <p className="hs-crisis">{CRISIS_TEXT}</p>
+        </main>
+      )}
+    </>
   );
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type ApiResponse } from "./api";
+import { SpeakButton, VoiceDictateBar, useSpeech } from "./strengthsSpeech";
 
 type AppState = ApiResponse<typeof api, "getAppState">;
 type JournalEntry = AppState["journal"]["history"][number];
@@ -37,7 +38,7 @@ function formatTime12h(value: string): string {
   return `${hour}:${String(m).padStart(2, "0")} ${suffix}`;
 }
 
-function EmotionChips({ entry }: { entry: JournalEntry }) {
+export function EmotionChips({ entry }: { entry: JournalEntry }) {
   if (entry.emotions.length === 0) return null;
   return (
     <div className="emotion-chips" aria-label="Emotions read in this entry">
@@ -98,11 +99,15 @@ function WriteCard({ state, dateKey }: { state: AppState; dateKey: string }) {
   });
   const prefsChanged = reminderEnabled !== state.journal.prefs.reminderEnabled || reminderTime !== state.journal.prefs.reminderTime;
 
+  const appendSpokenEntry = (chunk: string) => {
+    setBody((prev) => (prev.trim() ? `${prev.trim()} ${chunk}` : chunk));
+  };
+
   return (
     <section className="journal-card" aria-labelledby="journal-heading">
       <div className="section-line">
         <div>
-          <p className="eyebrow">STEP 1 · WRITE</p>
+          <p className="eyebrow">STEP 1 · WRITE OR SPEAK</p>
           <h2 id="journal-heading">Today's journal</h2>
         </div>
         <span className="ritual-total">{state.journal.streak}<small> day streak</small></span>
@@ -137,12 +142,14 @@ function WriteCard({ state, dateKey }: { state: AppState; dateKey: string }) {
           <div className="journal-saved-actions">
             <button className="wake-edit" onClick={() => setEditing(true)}>Edit today's entry</button>
             <button className="wake-edit" disabled={analyze.isPending} onClick={() => analyze.mutate()}>{analyze.isPending ? "Reading…" : saved.emotions.length > 0 ? "Re-read the emotions" : "Read the emotions in this entry"}</button>
+            <SpeakButton id={`journal-entry-${dateKey}`} label="Listen to today's journal entry" text={`${saved.body}${saved.insight ? ` Insight: ${saved.insight}` : ""}`} />
           </div>
           {analyze.isError && <p className="inline-error" role="alert">The emotion read didn't land. Your entry is saved — try again.</p>}
         </div>
       ) : (
         <div className="journal-form">
-          <label className="journal-field"><span>Your entry{wordCount > 0 ? ` · ${wordCount} words` : ""}</span><textarea rows={7} maxLength={4000} value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write it plain. Nobody grades this — future you reads it." aria-label="Today's journal entry" /></label>
+          <VoiceDictateBar label="Speak your journal entry" onAppend={appendSpokenEntry} />
+          <label className="journal-field"><span>Your entry{wordCount > 0 ? ` · ${wordCount} words` : ""}</span><textarea rows={7} maxLength={4000} value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write it plain or tap Speak above. Nobody grades this — future you reads it." aria-label="Today's journal entry" /></label>
           <button className="save-checkin" disabled={!body.trim() || save.isPending} onClick={() => save.mutate()}>{save.isPending ? "Saving…" : saved ? "Update entry" : "Save entry"}</button>
           {save.isError && <p className="inline-error" role="alert">Couldn't save yet. Your words are still here.</p>}
           {saved && <button className="wake-edit" onClick={() => { setBody(saved.body); setEditing(false); }}>Cancel edit</button>}
@@ -167,6 +174,7 @@ function WriteCard({ state, dateKey }: { state: AppState; dateKey: string }) {
 }
 
 function ReflectPanel({ state, dateKey }: { state: AppState; dateKey: string }) {
+  const sp = useSpeech();
   const queryClient = useQueryClient();
   const saved = state.journal.today;
   const reflectionQuery = useQuery({ queryKey: ["journal-reflection", dateKey], queryFn: () => api.getJournalReflection({ dateKey }) });
@@ -174,6 +182,8 @@ function ReflectPanel({ state, dateKey }: { state: AppState; dateKey: string }) 
   const [mode, setMode] = useState<DeeperMode>("conversational");
   const [draft, setDraft] = useState("");
   const [pendingText, setPendingText] = useState<string | null>(null);
+
+  const activePreset = PRESETS.find((item) => item.key === preset) ?? PRESETS[0]!;
 
   const refresh = async () => {
     await Promise.all([
@@ -184,7 +194,12 @@ function ReflectPanel({ state, dateKey }: { state: AppState; dateKey: string }) 
 
   const deeper = useMutation({
     mutationFn: (message: string) => api.journalGoDeeper({ dateKey, preset, mode, message }),
-    onSuccess: refresh,
+    onSuccess: async (data) => {
+      await refresh();
+      if (sp.voiceReply && data.reply) {
+        sp.speak(`deeper-reply-${Date.now()}`, `${activePreset.name} reflection`, data.reply);
+      }
+    },
     onSettled: () => setPendingText(null),
   });
   const minds = useMutation({
@@ -192,24 +207,27 @@ function ReflectPanel({ state, dateKey }: { state: AppState; dateKey: string }) 
     onSuccess: refresh,
   });
 
-  const submitDeeper = (event: FormEvent) => {
-    event.preventDefault();
-    const message = draft.trim();
+  const sendMessage = (rawMessage: string) => {
+    const message = rawMessage.trim();
     if (!message || deeper.isPending) return;
     setPendingText(message);
     setDraft("");
     deeper.mutate(message);
   };
 
+  const submitDeeper = (event: FormEvent) => {
+    event.preventDefault();
+    sendMessage(draft);
+  };
+
   const deeperMessages = reflectionQuery.data?.deeper ?? [];
   const mindComments = reflectionQuery.data?.minds ?? [];
-  const activePreset = PRESETS.find((item) => item.key === preset) ?? PRESETS[0]!;
 
   return (
     <section className="journal-card" aria-labelledby="reflect-heading">
       <div className="section-line">
         <div>
-          <p className="eyebrow">STEPS 2 + 3 · REFLECT</p>
+          <p className="eyebrow">STEPS 2 + 3 · REFLECT (TEXT OR LIVE VOICE)</p>
           <h2 id="reflect-heading">Go deeper</h2>
         </div>
       </div>
@@ -229,16 +247,31 @@ function ReflectPanel({ state, dateKey }: { state: AppState; dateKey: string }) 
           </div>
 
           <div className="chat-thread" aria-live="polite" aria-label="Go Deeper conversation about today's entry">
-            {deeperMessages.length === 0 && !pendingText && <p className="empty">No reflection yet. Say what the entry brings up, or ask what you might be missing — the {activePreset.name} lens answers from what you wrote.</p>}
-            {deeperMessages.map((message) => (
-              <article className={`chat-bubble ${message.role === "user" ? "user" : "assistant"}`} key={message.id}>
-                <span>{message.role === "user" ? "You" : (PRESETS.find((item) => item.key === message.preset)?.name ?? "Companion")}</span>
-                <p>{message.content}</p>
-              </article>
-            ))}
+            {deeperMessages.length === 0 && !pendingText && <p className="empty">No reflection yet. Type or use Live Voice below — the {activePreset.name} lens answers from what you wrote.</p>}
+            {deeperMessages.map((message) => {
+              const speakerName = message.role === "user" ? "You" : (PRESETS.find((item) => item.key === message.preset)?.name ?? "Companion");
+              return (
+                <article className={`chat-bubble ${message.role === "user" ? "user" : "assistant"}`} key={message.id}>
+                  <div className="chat-bubble-meta">
+                    <span>{speakerName}</span>
+                    {message.role !== "user" && <SpeakButton variant="icon" id={`deeper-msg-${message.id}`} label={`Listen to ${speakerName}`} text={message.content} />}
+                  </div>
+                  <p>{message.content}</p>
+                </article>
+              );
+            })}
             {pendingText && <article className="chat-bubble user"><span>You</span><p>{pendingText}</p></article>}
             {deeper.isPending && <article className="chat-bubble assistant pending"><span>{activePreset.name}</span><p>reflecting…</p></article>}
           </div>
+
+          <VoiceDictateBar
+            label={`Talk to ${activePreset.name}`}
+            onAppend={(chunk) => setDraft((prev) => (prev.trim() ? `${prev.trim()} ${chunk}` : chunk))}
+            onSendTurn={(spoken) => sendMessage(spoken)}
+            showVoiceReplyToggle
+            replyPersona={activePreset.name}
+          />
+
           <form className="chat-compose" onSubmit={submitDeeper}>
             <label htmlFor="deeper-input">Go deeper on today's entry</label>
             <textarea id="deeper-input" rows={2} maxLength={2000} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="What part of this entry deserves a second look?" />
@@ -251,7 +284,19 @@ function ReflectPanel({ state, dateKey }: { state: AppState; dateKey: string }) 
               <h3>Invite the Minds</h3>
               <p>Four Minds read today's entry and leave their comments on it.</p>
             </div>
-            <button className="wake-edit" disabled={minds.isPending} onClick={() => minds.mutate()}>{minds.isPending ? "Reading…" : mindComments.length > 0 ? "Re-invite the Minds" : "Invite the Minds"}</button>
+            <div className="minds-actions">
+              {mindComments.length > 0 && (
+                <SpeakButton
+                  id={`minds-all-${dateKey}`}
+                  label="Listen to all four Minds"
+                  text={MINDS.map((m) => {
+                    const c = mindComments.find((item) => item.mind === m.key);
+                    return c ? `${m.name}: ${c.content}` : "";
+                  }).filter(Boolean).join(" ")}
+                />
+              )}
+              <button className="wake-edit" disabled={minds.isPending} onClick={() => minds.mutate()}>{minds.isPending ? "Reading…" : mindComments.length > 0 ? "Re-invite the Minds" : "Invite the Minds"}</button>
+            </div>
           </div>
           {minds.isError && <p className="inline-error" role="alert">The Minds didn't answer this time. Your entry is saved — try again.</p>}
           {minds.data?.crisis && <p className="inline-error" role="alert">One of your entries mentions possible self-harm, so the Minds step back. If that is live for you right now: call or text 988 (Suicide and Crisis Lifeline, free, 24/7), or 911 if you might act on it.</p>}
@@ -260,7 +305,10 @@ function ReflectPanel({ state, dateKey }: { state: AppState; dateKey: string }) 
               const comment = mindComments.find((item) => item.mind === mind.key);
               return (
                 <article className="mind-card" key={mind.key}>
-                  <h4>{mind.name}</h4>
+                  <div className="mind-card-head">
+                    <h4>{mind.name}</h4>
+                    {comment && <SpeakButton variant="icon" id={`mind-${mind.key}-${dateKey}`} label={`Listen to ${mind.name}`} text={`${mind.name}. ${comment.content}`} />}
+                  </div>
                   <p className="mind-desc">{mind.description}</p>
                   {comment ? <p className="mind-comment">{comment.content}</p> : <p className="mind-waiting">Not invited yet.</p>}
                 </article>
@@ -307,22 +355,33 @@ function EmotionPatterns({ state }: { state: AppState }) {
 }
 
 function AskJournal({ state, dateKey }: { state: AppState; dateKey: string }) {
+  const sp = useSpeech();
   const queryClient = useQueryClient();
   const reflectionQuery = useQuery({ queryKey: ["journal-reflection", dateKey], queryFn: () => api.getJournalReflection({ dateKey }) });
   const [draft, setDraft] = useState("");
   const [pendingText, setPendingText] = useState<string | null>(null);
   const ask = useMutation({
     mutationFn: (message: string) => api.askJournal({ message }),
-    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["journal-reflection", dateKey] }); },
+    onSuccess: async (data) => {
+      await queryClient.invalidateQueries({ queryKey: ["journal-reflection", dateKey] });
+      if (sp.voiceReply && data.reply) {
+        sp.speak(`ask-journal-${Date.now()}`, "Your Journal answer", data.reply);
+      }
+    },
     onSettled: () => setPendingText(null),
   });
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    const message = draft.trim();
+
+  const sendQuestion = (rawMessage: string) => {
+    const message = rawMessage.trim();
     if (!message || ask.isPending) return;
     setPendingText(message);
     setDraft("");
     ask.mutate(message);
+  };
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    sendQuestion(draft);
   };
   const messages = reflectionQuery.data?.askMessages ?? [];
   return (
@@ -334,13 +393,23 @@ function AskJournal({ state, dateKey }: { state: AppState; dateKey: string }) {
         {messages.length === 0 && !pendingText && <p className="empty">{state.journal.totalEntries === 0 ? "Nothing to search yet — your journal starts with today's entry above." : "No questions yet. Your journal is ready when you are."}</p>}
         {messages.map((message) => (
           <article className={`chat-bubble ${message.role === "user" ? "user" : "assistant"}`} key={message.id}>
-            <span>{message.role === "user" ? "You" : "Your Journal"}</span>
+            <div className="chat-bubble-meta">
+              <span>{message.role === "user" ? "You" : "Your Journal"}</span>
+              {message.role !== "user" && <SpeakButton variant="icon" id={`ask-msg-${message.id}`} label="Listen to Journal answer" text={message.content} />}
+            </div>
             <p>{message.content}</p>
           </article>
         ))}
         {pendingText && <article className="chat-bubble user"><span>You</span><p>{pendingText}</p></article>}
         {ask.isPending && <article className="chat-bubble assistant pending"><span>Your Journal</span><p>searching your entries…</p></article>}
       </div>
+      <VoiceDictateBar
+        label="Ask by voice"
+        onAppend={(chunk) => setDraft((prev) => (prev.trim() ? `${prev.trim()} ${chunk}` : chunk))}
+        onSendTurn={(spoken) => sendQuestion(spoken)}
+        showVoiceReplyToggle
+        replyPersona="Journal"
+      />
       <form className="chat-compose" onSubmit={submit}>
         <label htmlFor="ask-input">Ask your journal</label>
         <textarea id="ask-input" rows={2} maxLength={1000} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="What do my entries say about…?" />
@@ -361,8 +430,13 @@ function WeekRecap({ state, dateKey }: { state: AppState; dateKey: string }) {
   });
   return (
     <section className="journal-card" aria-labelledby="recap-heading">
-      <p className="eyebrow">YOUR WEEK, WRAPPED</p>
-      <h2 id="recap-heading">Weekly recap</h2>
+      <div className="section-line">
+        <div>
+          <p className="eyebrow">YOUR WEEK, WRAPPED</p>
+          <h2 id="recap-heading">Weekly recap</h2>
+        </div>
+        {recap && <SpeakButton id={`weekly-recap-${dateKey}`} label="Listen to weekly recap" text={recap} />}
+      </div>
       {recap ? <p className="recap-body">{recap}</p> : <p className="empty">A short read on this week's entries: what the week was about, the mindset running through it, and one suggestion for next week.</p>}
       {meta && <p className="journal-themes">Built from {meta.entryCount} entr{meta.entryCount === 1 ? "y" : "ies"} this week · {meta.streak}-day streak.</p>}
       <button className="save-checkin" disabled={build.isPending} onClick={() => build.mutate(!!recap)}>{build.isPending ? "Writing your recap…" : recap ? "Refresh recap" : "Build this week's recap"}</button>
@@ -371,7 +445,7 @@ function WeekRecap({ state, dateKey }: { state: AppState; dateKey: string }) {
   );
 }
 
-function JournalFeed({ state }: { state: AppState }) {
+export function JournalFeed({ state }: { state: AppState }) {
   type FeedItem = { key: string; dateKey: string; order: number; kind: string; title: string; text: string; entry?: JournalEntry };
   const items: FeedItem[] = [];
   state.journal.history.forEach((entry) => {
@@ -392,7 +466,13 @@ function JournalFeed({ state }: { state: AppState }) {
       <h2 id="feed-heading">Everything you've written</h2>
       {items.length === 0 ? <p className="empty">Your journal entries, nightly checks, and check-in notes gather here as you write them.</p> : items.slice(0, 40).map((item) => (
         <article className="feed-row" key={item.key}>
-          <div className="feed-head"><span className="feed-kind">{item.kind}</span><time>{formatDate(`${item.dateKey}T12:00:00`)}</time></div>
+          <div className="feed-head">
+            <span className="feed-kind">{item.kind}</span>
+            <div className="feed-head-right">
+              <SpeakButton variant="icon" id={`feed-${item.key}`} label={`Listen to ${item.kind} from ${item.dateKey}`} text={`${item.title}. ${item.text}`} />
+              <time>{formatDate(`${item.dateKey}T12:00:00`)}</time>
+            </div>
+          </div>
           <p className="feed-title">{item.title}</p>
           <p className="feed-text">{item.text}</p>
           {item.entry && <EmotionChips entry={item.entry} />}
@@ -403,7 +483,7 @@ function JournalFeed({ state }: { state: AppState }) {
   );
 }
 
-export function JournalView({ state, dateKey }: { state: AppState; dateKey: string }) {
+export function JournalStudioView({ state, dateKey }: { state: AppState; dateKey: string }) {
   return (
     <>
       <WriteCard state={state} dateKey={dateKey} />
@@ -411,6 +491,14 @@ export function JournalView({ state, dateKey }: { state: AppState; dateKey: stri
       <EmotionPatterns state={state} />
       <AskJournal state={state} dateKey={dateKey} />
       <WeekRecap state={state} dateKey={dateKey} />
+    </>
+  );
+}
+
+export function JournalView({ state, dateKey }: { state: AppState; dateKey: string }) {
+  return (
+    <>
+      <JournalStudioView state={state} dateKey={dateKey} />
       <JournalFeed state={state} />
     </>
   );

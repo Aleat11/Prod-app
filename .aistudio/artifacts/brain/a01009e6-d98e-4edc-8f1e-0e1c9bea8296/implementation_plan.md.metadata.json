@@ -1,0 +1,6 @@
+{
+  "summary":  "Updated implementation plan adding Live Voice mode (real-time speech-to-text dictation + hands-free spoken replies and audio readback) as an option across Journaling and Higher Self, alongside the Today tab reorganization, Training rest timer & collapsible exercise guides, and Journal Studio vs. Logbook split.",
+  "updatedAt":  "2026-10-24T18:48:04.034128649Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}
