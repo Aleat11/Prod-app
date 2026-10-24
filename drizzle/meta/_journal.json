@@ -1,0 +1,118 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1790220846619,
+      "tag": "0001_initial",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790220846619,
+      "tag": "0002_workout_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790220846619,
+      "tag": "0003_daily_rituals",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790266630880,
+      "tag": "0004_add_bodyweight_phase",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790703950517,
+      "tag": "0005_add_session_save_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790704430703,
+      "tag": "0006_add_wellness_checkins",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790704466207,
+      "tag": "0007_correct_pike_rpe_zero",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790705695767,
+      "tag": "0008_add_gateway_coach_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790760444244,
+      "tag": "0009_add_daily_alignment_and_focus",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1791514829602,
+      "tag": "0010_add_hybrid_dumbbell_pullup_program",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1791591599221,
+      "tag": "0011_add_wake_time_tracking",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1791685388431,
+      "tag": "0012_add_strengths_section",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1791688904694,
+      "tag": "0013_add_chewing_gum_and_one_foot_stand_rituals",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1792079997365,
+      "tag": "0014_add_nightly_checks",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792080757542,
+      "tag": "0015_add_zephyr_results",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1792082564845,
+      "tag": "0016_add_higher_self_and_decider",
+      "breakpoints": true
+    }
+  ]
+}
